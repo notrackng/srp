@@ -1,0 +1,42 @@
+/* NGIX patch: public panel backdrop deglitch */
+.panel.panel-default,
+.panel:has(> .ngix-image-backdrop) {
+  position: relative !important;
+  overflow: hidden !important;
+  isolation: isolate !important;
+}
+.panel.panel-default > .ngix-image-backdrop,
+.panel > .ngix-image-backdrop {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: none !important;
+  z-index: 0 !important;
+  pointer-events: none !important;
+  background-repeat: no-repeat, no-repeat !important;
+  background-position: center center, center center !important;
+  background-size: 100% 100%, min(980px, 120%) auto !important;
+  opacity: .24 !important;
+  filter: saturate(.72) contrast(.86) blur(.18px) !important;
+  transform: none !important;
+}
+.panel.panel-default > *:not(.ngix-image-backdrop),
+.panel:has(> .ngix-image-backdrop) > *:not(.ngix-image-backdrop) {
+  position: relative !important;
+  z-index: 2 !important;
+}
+.modal,
+.modal * {
+  isolation: auto;
+}
+@media screen and (max-width: 768px) {
+  .panel.panel-default > .ngix-image-backdrop,
+  .panel > .ngix-image-backdrop {
+    background-size: 100% 100%, min(760px, 135%) auto !important;
+    opacity: .20 !important;
+  }
+}

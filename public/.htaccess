@@ -1,0 +1,104 @@
+Options -Indexes -MultiViews
+
+DirectoryIndex index.php login.php index.html
+
+<IfModule mod_mime.c>
+    AddDefaultCharset UTF-8
+    AddCharset UTF-8 .html .htm .css .js .mjs .json .svg
+</IfModule>
+
+# Shared 404 error document
+ErrorDocument 404 /404.php
+
+# ─── Block sensitive files ─────────────────────────────────────────────────────
+<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|xmlapi\.php|session_guards\.php|password\.login\.php|cf-lib\.php)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# This directory IS the document root in the per-subdomain deployment mode, so
+# the root .htaccess rule for these extensions does not apply here. Deny them
+# outright: a stray log or dump must never be fetchable over HTTP.
+<FilesMatch "\.(?i:log|bak|old|orig|swp|sql|dump|gz|tgz|zip|rar|7z)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block dot-files except .htaccess itself
+<FilesMatch "^\.(?!htaccess)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ─── Security headers ─────────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "same-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header always set Pragma "no-cache"
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# ─── Rewrite rules ────────────────────────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Force HTTPS Cloudflare-aware
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+    # gen.<BASEURL> without path and without query -> /login
+    RewriteCond %{QUERY_STRING} ^$
+    RewriteRule ^$ /login [R=301,L]
+    
+    # Canonical: /login.php -> /login
+    RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+    RewriteCond %{THE_REQUEST} \s/+login\.php(?:[?\s]) [NC]
+    RewriteRule ^login\.php$ /login [R=301,L]
+
+    # Canonical: legacy /index.php?sub_id=XXX -> clean /XXX
+    RewriteCond %{REQUEST_METHOD} =GET
+    RewriteCond %{THE_REQUEST} \s/+index\.php\?sub_id=([A-Za-z0-9_-]+)\s [NC]
+    RewriteRule ^ /%1? [R=301,L]
+
+    # Deny accidental PHP execution from static asset directory.
+    RewriteRule ^dist/.*\.php$ - [F,L,NC]
+
+    # Clean route: /login -> login.php
+    RewriteRule ^login/?$ login.php [L,QSA]
+
+    # Pass real files and directories through unchanged.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Route short links: /s-CODE -> s.php?c=CODE
+    RewriteRule ^s-([A-Za-z0-9]{4,32})/?$ s.php?c=$1 [QSA,L]
+
+    # Auto-append .php extension for extensionless requests.
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME}.php -f
+    RewriteRule ^(.+)$ $1.php [QSA,L]
+
+    # Route TOKEN -> index.php?sub_id=TOKEN
+    RewriteRule ^([A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*)/?$ index.php?sub_id=$1 [QSA,L]
+</IfModule>

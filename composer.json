@@ -1,0 +1,39 @@
+{
+    "name": "srp/public-app",
+    "description": "Smart Redirect Proxy public application",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.3",
+        "guzzlehttp/guzzle": "^7.9",
+        "maxmind-db/reader": "^1.13.1",
+        "mobiledetect/mobiledetectlib": "^4.11",
+        "geoip2/geoip2": "^3.3"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5",
+        "phpstan/phpstan": "^2.2",
+        "squizlabs/php_codesniffer": "^4.0",
+        "friendsofphp/php-cs-fixer": "^3.95"
+    },
+    "scripts": {
+        "cs": "@php vendor/bin/phpcs -n --extensions=php --ignore=*/public/addondomain/index.php,*/public/campaigns/index.php,*/public/index.php,*/statistics/clicks/index.php public redirect statistics env.php connection_pdo.php Base64URL.php asset_url.php index.php health.php legal.php ip_address.php login_throttle.php robots.php sitemap.php imgp_handler.php",
+        "fix": "@php vendor/bin/php-cs-fixer fix",
+        "stan": "@php vendor/bin/phpstan analyse --memory-limit=1G public redirect statistics env.php connection_pdo.php Base64URL.php asset_url.php index.php health.php legal.php ip_address.php login_throttle.php robots.php sitemap.php imgp_handler.php",
+        "test": "@php vendor/bin/phpunit --no-coverage",
+        "coverage": "@php vendor/bin/phpunit --coverage-text",
+        "check": [
+            "@cs",
+            "@stan",
+            "@test"
+        ]
+    },
+    "scripts-descriptions": {
+        "cs": "PSR-12 lint, errors only (warnings hidden; run vendor/bin/phpcs to see them)",
+        "fix": "Auto-format with PHP-CS-Fixer",
+        "stan": "PHPStan static analysis (level max, baseline-aware)",
+        "test": "Run PHPUnit suite (no coverage — the everyday gate)",
+        "coverage": "Run PHPUnit with text coverage (needs Xdebug or PCOV)",
+        "check": "Full quality gate: cs + stan + test"
+    }
+}

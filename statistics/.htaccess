@@ -1,0 +1,150 @@
+Options -Indexes -MultiViews
+
+DirectoryIndex index.php index.html
+
+# Shared 404 error document
+ErrorDocument 404 /404.php
+
+# ─── Block sensitive files ─────────────────────────────────────────────────────
+<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|phpunit\.xml|phpstan\.neon|\.gitignore)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block internal include-only files.
+#
+# NOTE on report-password.php: it is intentionally NOT in this list, but it is
+# only safe while report_auth.php exists. With that file absent the page renders
+# an UNAUTHENTICATED "create admin password" form, and whoever loads it first
+# owns the statistics report password. Set the password immediately after
+# opening it, or add report-password\.php back to this group.
+<FilesMatch "^(repass\.php|report_auth\.php|stat_path\.php|header\.php)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# This directory IS the document root in the per-subdomain deployment mode, so
+# the root .htaccess rule for these extensions does not apply here. Deny them
+# outright: a stray log or dump must never be fetchable over HTTP.
+<FilesMatch "\.(?i:log|bak|old|orig|swp|sql|dump|gz|tgz|zip|rar|7z)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block dot-files except .htaccess itself
+<FilesMatch "^\.(?!htaccess)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ─── Static MIME map ───────────────────────────────────────────────────────────
+<IfModule mod_mime.c>
+    AddDefaultCharset UTF-8
+    AddCharset UTF-8 .html .htm .css .js .mjs .json .svg
+    AddType text/css .css
+    AddType application/javascript .js
+    AddType image/svg+xml .svg
+    AddType image/png .png
+    AddType image/x-icon .ico
+    AddType font/woff .woff
+    AddType font/ttf .ttf
+    AddType application/vnd.ms-fontobject .eot
+</IfModule>
+
+# ─── Security headers ─────────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "same-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header always set Pragma "no-cache"
+    Header always set Expires "0"
+    Header always unset X-Powered-By
+    Header always unset Server
+
+    <FilesMatch "\.(?:css|js|svg|png|ico|eot|ttf|woff)$">
+        Header always set Cache-Control "public, max-age=604800, immutable"
+        Header always unset Pragma
+        Header always unset Expires
+    </FilesMatch>
+</IfModule>
+
+# ─── Rewrite rules ────────────────────────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Force HTTPS Cloudflare-aware
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+    # Legacy statistics clean canonical:
+    # /statistics/realtime              -> /realtime/
+    # /statistics/realtime/             -> /realtime/
+    # /statistics/realtime/index.php    -> /realtime/
+    # /statistics/performance           -> /performance/
+    # /statistics/clicks                -> /clicks/
+    # /statistics/postback              -> /postback/
+    #
+    # Keep R=302 while testing. Change to R=301 after confirmed.
+    RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+    RewriteRule ^statistics/(realtime|performance|clicks|postback)/index\.php$ /$1/ [R=302,L,NE]
+
+    RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+    RewriteRule ^statistics/(realtime|performance|clicks|postback)/?$ /$1/ [R=302,L,NE]
+
+    # Legacy nested path passthrough:
+    # /statistics/realtime/export.php -> /realtime/export.php
+    RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+    RewriteRule ^statistics/(realtime|performance|clicks|postback)/(.+)$ /$1/$2 [R=302,L,NE]
+
+    # Canonical clean URL: /shorten-web.php -> /shorten
+    RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+    RewriteCond %{THE_REQUEST} \s/+shorten-web\.php(?:[?\s]) [NC]
+    RewriteRule ^shorten-web\.php$ /shorten [R=302,L]
+
+    # Clean route: /shorten -> shorten-web.php
+    RewriteRule ^shorten/?$ shorten-web.php [L,QSA]
+
+    # s.example.com without path and without query -> /login
+    RewriteCond %{QUERY_STRING} ^$
+    RewriteRule ^$ /login [R=302,L]
+
+    # Canonical clean URL: /login.php -> /login
+    # GET/HEAD only to avoid breaking legacy POST form submissions.
+    RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+    RewriteRule ^login\.php$ /login [R=302,L]
+
+    # Clean route: /login -> login.php
+    RewriteRule ^login/?$ login.php [L,QSA]
+
+    # Never send real static assets to PHP/router fallback.
+    RewriteRule ^(?:dist|fonts|assets)/ - [L]
+    RewriteRule ^(?:favicon\.ico|robots\.txt)$ - [L]
+
+    # Pass real files and directories through unchanged.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+</IfModule>
