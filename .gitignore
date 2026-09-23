@@ -1,0 +1,37 @@
+# Local secrets / environment — never commit real values.
+.env
+
+# Pre-shared secret gating public/install.php. Created by the operator on disk
+# (see INSTALL.md); shipping one would let anyone reach the installer.
+install.token
+
+# Marks a completed install — written by public/install.php's finalize step.
+install.lock
+
+# Per-deployment PHP settings (real error_log path) written by the installer /
+# migrations/008_fix_user_ini_log_path.php. Shipping one bakes a stranger's
+# account path into every deployment.
+public/.user.ini
+redirect/.user.ini
+statistics/.user.ini
+
+# Generated at deploy time by the operator via the first-load password setup
+# in statistics/report-password.php. Shipping one hands every deployment the
+# same hash.
+statistics/report_auth.php
+
+# Same first-load setup (statistics/report-password.php) generates this one
+# too — it defines REPASS, one of the two valid credentials for the
+# statistics global-admin login (statistics/login.php). Shipping a real value
+# hands every deployment the same admin password hash.
+statistics/repass.php
+
+# Runtime logs.
+*.log
+public/addondomain/error_log
+public/api/error_log
+redirect/logs/
+
+# Build artifacts — production release packages are generated, never committed.
+*.zip
+
