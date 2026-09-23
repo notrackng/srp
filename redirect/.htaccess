@@ -1,0 +1,120 @@
+Options -Indexes -MultiViews
+
+# Shared 404 error document (root .htaccess remaps /404.php → redirect/404.php shim)
+ErrorDocument 404 /404.php
+
+<IfModule mod_mime.c>
+    AddDefaultCharset UTF-8
+    AddCharset UTF-8 .html .htm .css .js .mjs .json .svg
+</IfModule>
+
+# ─── Block sensitive files ─────────────────────────────────────────────────────
+<FilesMatch "^(\.env|\.env\..*|env\.php|connection\.config\.php|redirect_payload\.php|public_link\.php|ip_address\.php|Base64URL\.php|Mobile_Detect\.php|phpstan.*|composer\.(json|lock))$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Logs live in logs/ inside this module, which IS the document root in the
+# per-subdomain deployment mode. Deny the extensions outright so an error log
+# (paths, IPs, tokens) can never be fetched over HTTP. The root .htaccess has
+# the same rule, but it does not apply when redirect/ is the docroot.
+<FilesMatch "\.(?i:log|bak|old|orig|swp|sql|dump|gz|tgz|zip)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block dot-files (except .htaccess itself)
+<FilesMatch "^\.(?!htaccess)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ─── Security headers ─────────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "no-referrer"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=()"
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0, no-transform"
+    Header always set Pragma "no-cache"
+    Header always set Expires "0"
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# imgp.php must be publicly cacheable for Facebook/social scrapers
+<Files "imgp.php">
+    <IfModule mod_headers.c>
+        Header always unset Cache-Control
+        Header always unset Pragma
+        Header always unset Expires
+        Header always set Cache-Control "public, max-age=86400, immutable"
+    </IfModule>
+</Files>
+
+# Landing assets are duplicated under this wildcard docroot so deployment mode
+# B can serve /assets/* without exposing files outside the document root.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(?:jpe?g|svg|mp4)$">
+        Header always set Cache-Control "public, max-age=2592000"
+        Header always unset Pragma
+        Header always unset Expires
+    </FilesMatch>
+</IfModule>
+
+# ─── Rewrite rules ────────────────────────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block directory traversal to sensitive paths
+    RewriteRule ^(vendor|dist|databases|cgi-bin)/ - [F,L]
+
+    # Route /api/shorten → api/shorten.php
+    RewriteRule ^api/shorten/?$ api/shorten.php [QSA,L]
+    
+    # Route /shorten → shorten-web.php
+    RewriteRule ^shorturl/?$ shorten-web.php [L]
+    
+    # Block direct web access to PHP helper / internal / CLI-only files
+    RewriteRule ^(env|connection\.config|redirect_payload|public_link|ip_address|Base64URL|Mobile_Detect|phpstan-bootstrap|generate-short-link|shorten-client|update-geoip|cleanup-cache)\.php$ - [F,L]
+
+    # Pass real files and directories through unchanged
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Route image proxy clean URL
+    RewriteRule ^imgp/?$ imgp.php [QSA,L]
+
+    # Route TOKEN (with or without trailing slash) → index.php?sub_id=TOKEN
+    RewriteRule ^([a-zA-Z0-9_-]{1,2048})/?$ index.php?sub_id=$1 [QSA,NC,L]
+</IfModule>
+
+# BEGIN cPanel-generated php ini directives, do not edit
+# Manual editing of this file may result in unexpected behavior.
+# To make changes to this file, use the cPanel MultiPHP INI Editor (Home >> Software >> MultiPHP INI Editor)
+# For more information, read our documentation (https://go.cpanel.net/EA4ModifyINI)
+<IfModule php8_module>
+   php_value error_log "/home/REDACTED-ACCT/logs/php.error.log"
+   php_flag log_errors On
+</IfModule>
+<IfModule lsapi_module>
+   php_value error_log "/home/REDACTED-ACCT/logs/php.error.log"
+   php_flag log_errors On
+</IfModule>
+# END cPanel-generated php ini directives, do not edit
