@@ -283,7 +283,7 @@ if (!$isPreviewProbe) {
         // (disk/permission fault), let the request through rather than block
         // legitimate traffic on a rate-limit I/O error.
         $rlFp = @fopen($rateLimitFile, 'c+');
-    if ($rlFp !== false) {
+        if ($rlFp !== false) {
             if (flock($rlFp, LOCK_EX)) {
                 $raw    = (string) stream_get_contents($rlFp, 128, 0);
                 $rlData = $raw !== '' ? json_decode($raw, true) : null;
