@@ -18,7 +18,15 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          # composer.json declares "php": ">=8.3", but composer.lock's dev
+          # dependencies (friendsofphp/php-cs-fixer -> symfony/*) are locked
+          # to versions requiring PHP >=8.4.1, so `composer install` (with
+          # dev deps) only resolves on 8.4+. Production installs are
+          # unaffected (they use `composer install --no-dev`, skipping these
+          # packages entirely) — see INSTALL.md. Track whichever PHP version
+          # composer.lock's dev deps actually require until that mismatch is
+          # resolved.
+          php-version: "8.4"
           extensions: pdo_mysql, curl, mbstring, openssl, gd, zip, maxminddb
           coverage: none
           tools: composer:v2
