@@ -19,8 +19,8 @@
     "scripts": {
         "cs": "@php vendor/bin/phpcs -n --extensions=php --ignore=*/public/addondomain/index.php,*/public/campaigns/index.php,*/public/index.php,*/statistics/clicks/index.php public redirect statistics env.php connection_pdo.php Base64URL.php asset_url.php index.php health.php legal.php ip_address.php login_throttle.php robots.php sitemap.php imgp_handler.php",
         "fix": "@php vendor/bin/php-cs-fixer fix",
-        "stan": "@php vendor/bin/phpstan analyse --memory-limit=1G public redirect statistics env.php connection_pdo.php Base64URL.php asset_url.php index.php health.php legal.php ip_address.php login_throttle.php robots.php sitemap.php imgp_handler.php",
-        "test": "@php vendor/bin/phpunit --no-coverage",
+        "stan": "@php vendor/bin/phpstan analyse --memory-limit=1G public redirect statistics env.php connection_pdo.php domain_readiness.php Base64URL.php asset_url.php index.php health.php legal.php ip_address.php login_throttle.php robots.php sitemap.php imgp_handler.php",
+        "test": "@php vendor/bin/phpunit --no-coverage tests",
         "coverage": "@php vendor/bin/phpunit --coverage-text",
         "check": [
             "@cs",
