@@ -1,0 +1,311 @@
+Options -Indexes -MultiViews
+
+DirectoryIndex index.php index.html
+
+<IfModule mod_mime.c>
+    AddDefaultCharset UTF-8
+    AddCharset UTF-8 .html .htm .css .js .mjs .json .svg
+</IfModule>
+
+# Shared 404 error document (WrongURL). Subdomain routing below remaps /404.php
+# into each module dir, where a thin shim re-includes this root file.
+ErrorDocument 404 /404.php
+
+RewriteEngine On
+
+# Stop second-pass rewrite loop after internal routing
+RewriteCond %{ENV:REDIRECT_SUBROUTED} ^1$
+RewriteRule ^ - [L]
+
+# ─── Block the test suite ─────────────────────────────────────────────────────
+# tests/ is a dev artefact and must never be served. This has to sit ahead of
+# the subdomain routing below: once a request is rewritten it carries
+# SUBROUTED and the restart pass is stopped, so a later rule never sees it.
+# Deploy with composer install --no-dev and do not upload this directory.
+RewriteRule ^tests(/|$) - [F,L]
+
+# --- Block the migration scripts ---------------------------------------------
+# migrations/ holds one-off schema/data scripts run manually from the CLI during
+# an upgrade. Nothing there is authenticated, so a direct HTTP hit would execute
+# an ALTER TABLE or a data back-fill on request. Same placement reason as tests/
+# above: it must run before the subdomain routing sets SUBROUTED.
+RewriteRule ^migrations(/|$) - [F,L]
+
+# ─── Brand asset passthrough (host-independent) ───────────────────────────────
+# Serves root /assets for /__brand/* on every host so 404.php / fallback screens
+# load the WrongURL logo+favicon on gen/s/r subdomains without duplicate assets.
+# SUBROUTED stops the restart pass from re-applying subdomain routing.
+RewriteRule ^__brand/(.+)$ assets/$1 [E=SUBROUTED:1,L]
+
+# ─── Service worker (host-independent) ───────────────────────────────────────
+# assets/js/portal-5.js registers navigator.serviceWorker.register('/sw.js').
+# That absolute path only resolved when public/ was the docroot, so on any other
+# host the registration silently 404'd.
+# SUBROUTED stops the restart pass from re-applying subdomain routing.
+RewriteRule ^sw\.js$ public/sw.js [E=SUBROUTED:1,L]
+
+# ─── Global static asset aliases (host-independent) ───────────────────────────
+# Canonical static storage lives in root /assets.
+# Keep /dist and /fonts aliases for backward compatibility during path migration.
+
+RewriteRule ^assets/dist/(.+\.(?:css|eot|ttf|woff2?|otf))$ assets/css/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^assets/dist/(.+\.(?:js|mjs))$ assets/js/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^assets/dist/(.+\.(?:png|svg|jpe?g|webp|ico|gif))$ assets/img/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^assets/dist/(.+\.(?:mp4|webm|ogv|ogg|m4v|mov))$ assets/video/$1 [NC,E=SUBROUTED:1,L]
+
+RewriteRule ^assets/fonts/(.+)$ assets/css/$1 [NC,E=SUBROUTED:1,L]
+
+RewriteRule ^dist/(.+\.(?:css|eot|ttf|woff2?|otf))$ assets/css/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^dist/(.+\.(?:js|mjs))$ assets/js/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^dist/(.+\.(?:png|svg|jpe?g|webp|ico|gif))$ assets/img/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^dist/(.+\.(?:mp4|webm|ogv|ogg|m4v|mov))$ assets/video/$1 [NC,E=SUBROUTED:1,L]
+
+RewriteRule ^fonts/(.+)$ assets/css/$1 [NC,E=SUBROUTED:1,L]
+
+RewriteRule ^assets/([^/]+\.(?:css|eot|ttf|woff2?|otf))$ assets/css/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^assets/([^/]+\.(?:js|mjs))$ assets/js/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^assets/([^/]+\.(?:png|svg|jpe?g|webp|ico|gif))$ assets/img/$1 [NC,E=SUBROUTED:1,L]
+RewriteRule ^assets/([^/]+\.(?:mp4|webm|ogv|ogg|m4v|mov))$ assets/video/$1 [NC,E=SUBROUTED:1,L]
+
+RewriteRule ^assets/(.+)$ assets/$1 [E=SUBROUTED:1,L]
+
+# ─── Public root discovery/legal endpoints ───────────────────────────────────
+RewriteRule ^(privacy|terms|abuse)\.html$ legal.php?page=$1 [L,QSA]
+RewriteRule ^sitemap\.xml$ sitemap.php [L,QSA]
+RewriteRule ^robots\.txt$ robots.php [L,QSA]
+
+# ─── Block reserved/system subdomains ─────────────────────────────────────────
+RewriteCond %{HTTP_HOST} ^(?:mail|cpanel|webmail|webdisk|autodiscover|ftp)\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteRule ^ - [F,L]
+
+# The web installer lives behind install-dashboard.php?install=1 (install.php was
+# folded into installer_lib.php; env-config.php, the previous entry point, was
+# removed along with the .env editor it carried). Access requires install.token
+# to exist at the docroot and its secret to be posted back; the installer refuses
+# to run once install.lock exists, and finalize deletes the token. Both files
+# are denied below, so neither is ever served.
+
+RewriteRule ^redirect-decision\.php$ public/redirect-decision.php [L]
+
+# ─── gen.<base-domain> clean login routing ────────────────────────────────────
+# gen.example.com/login.php -> /login
+# GET/HEAD only to avoid breaking legacy POST form submissions.
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{REQUEST_METHOD} ^(?:GET|HEAD)$ [NC]
+RewriteRule ^login\.php$ /login [R=302,L]
+
+# gen.example.com with empty path and no query string -> /login
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{QUERY_STRING} ^$
+RewriteRule ^$ /login [R=302,L]
+
+# gen.example.com/login -> <APP_ROOT>/public/login.php
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteRule ^login/?$ public/login.php [E=SUBROUTED:1,L,QSA]
+
+# ─── r.<base-domain> clean shorten routing ────────────────────────────────────
+# r.example.com/shorten -> <APP_ROOT>/redirect/shorten-web.php
+# (shorten-web.php calls its own host's /api/shorten, which only exists under
+# redirect/ — must stay on the r. host, not s., or the self-call 404s)
+RewriteCond %{HTTP_HOST} ^r\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteRule ^shorten/?$ redirect/shorten-web.php [E=SUBROUTED:1,L,QSA]
+
+# ─── Exact subdomain routing, auto DocumentRoot ────────────────────────────────
+# gen.<base-domain> -> <APP_ROOT>/public
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/public -d
+RewriteRule ^(.*)$ public/$1 [E=SUBROUTED:1,L,QSA]
+
+# s.<base-domain> -> <APP_ROOT>/statistics
+RewriteCond %{HTTP_HOST} ^s\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/statistics -d
+RewriteRule ^(.*)$ statistics/$1 [E=SUBROUTED:1,L,QSA]
+
+# r.<base-domain> -> <APP_ROOT>/redirect
+RewriteCond %{HTTP_HOST} ^r\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/redirect -d
+RewriteRule ^(.*)$ redirect/$1 [E=SUBROUTED:1,L,QSA]
+
+# ─── Missing exact folder: allow existing root files/assets ───────────────────
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/public !-d
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteCond %{HTTP_HOST} ^s\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/statistics !-d
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+RewriteCond %{HTTP_HOST} ^r\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/redirect !-d
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# ─── Other wildcard subdomains: allow existing root files/assets ──────────────
+RewriteCond %{HTTP_HOST} ^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{HTTP_HOST} !^(?:gen|s|r)\. [NC]
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# ─── Missing exact folder fallback to root index.php/index.html ───────────────
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/public !-d
+RewriteCond %{DOCUMENT_ROOT}/index.php -f
+RewriteRule ^.*$ index.php [E=SUBROUTED:1,L,QSA]
+
+RewriteCond %{HTTP_HOST} ^gen\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/public !-d
+RewriteCond %{DOCUMENT_ROOT}/index.html -f
+RewriteRule ^.*$ index.html [E=SUBROUTED:1,L,QSA]
+
+RewriteCond %{HTTP_HOST} ^s\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/statistics !-d
+RewriteCond %{DOCUMENT_ROOT}/index.php -f
+RewriteRule ^.*$ index.php [E=SUBROUTED:1,L,QSA]
+
+RewriteCond %{HTTP_HOST} ^s\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/statistics !-d
+RewriteCond %{DOCUMENT_ROOT}/index.html -f
+RewriteRule ^.*$ index.html [E=SUBROUTED:1,L,QSA]
+
+RewriteCond %{HTTP_HOST} ^r\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/redirect !-d
+RewriteCond %{DOCUMENT_ROOT}/index.php -f
+RewriteRule ^.*$ index.php [E=SUBROUTED:1,L,QSA]
+
+RewriteCond %{HTTP_HOST} ^r\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/redirect !-d
+RewriteCond %{DOCUMENT_ROOT}/index.html -f
+RewriteRule ^.*$ index.html [E=SUBROUTED:1,L,QSA]
+
+# ─── Other wildcard subdomains → TOKEN/short-code routing ─────────────────────
+# Route TOKEN or s-{code} path to redirect engine with sub_id parameter.
+# Real files and directories are already handled above (e.g. _meetups/, imgp.php).
+RewriteCond %{HTTP_HOST} ^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{HTTP_HOST} !^(?:gen|s|r)\. [NC]
+RewriteCond %{DOCUMENT_ROOT}/index.php -f
+RewriteRule ^([a-zA-Z0-9_-]{1,2048})/?$ index.php?sub_id=$1 [E=SUBROUTED:1,L,QSA]
+
+# If no root index exists, return 404 for subdomains
+RewriteCond %{HTTP_HOST} ^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
+RewriteCond %{DOCUMENT_ROOT}/index.php !-f
+RewriteRule ^ - [R=404,L]
+
+# ─── Block sensitive files ────────────────────────────────────────────────────
+<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|install\.(lock|token)|schema\.sql|\.gitignore|\.gitattributes|phpunit\.xml(\.dist)?|phpstan(-baseline)?\.neon|\.php-cs-fixer\.dist\.php|(DEPLOY|INSTALL)(-[0-9A-Za-z._-]+)?\.md|README\.md|CLAUDE\.md|CPANEL_DEPLOYMENT_CHECKLIST\.md)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ─── Block archives and operational dumps ─────────────────────────────────────
+# schema.zip and .well-known.zip sat here and were publicly downloadable: the
+# sensitive-file list below only names schema.sql, and the dot-file rule
+# explicitly excludes anything starting ".well-known". Each held 635 entries —
+# the whole application, .env included. Deny the file types outright so a stray
+# archive can never be served again.
+<FilesMatch "\.(?i:zip|rar|7z|tar|tgz|gz|bz2|bak|old|orig|swp|sql|log|dump)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+# Block dot-files except .htaccess and .well-known/
+<FilesMatch "^\.(?!htaccess|well-known)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block internal PHP utility files
+<FilesMatch "^(env|connection_pdo|Base64URL|Mobile_Detect|ip_address|login_throttle|imgp_handler|asset_url|installer_lib)\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block operator tooling. setup-cron.sh, rotate-logs.sh and smoke-test.ps1 ship
+# in the package but are not application code: served as plain text they leak the
+# cron layout, PHP binary paths and the smoke-test endpoint list.
+<FilesMatch "\.(?i:sh|ps1|bat|cmd)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ─── Security headers ─────────────────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "same-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0, no-transform"
+    Header always set Pragma "no-cache"
+    Header always set Expires "0"
+    Header always unset X-Powered-By
+    Header always unset Server
+</IfModule>
+
+# ─── Static asset caching ─────────────────────────────────────────────────────
+# The no-store above is correct for PHP/HTML (authenticated pages must never be
+# cached) but it also applied to /assets/*, so every page view re-downloaded the
+# whole CSS/JS payload. Scope a cacheable policy to static files only.
+#
+# App CSS/JS is referenced with a ?v=<mtime> stamp (srpAssetUrl() / statAssetUrl()),
+# so an edit changes the URL and invalidates immediately. 30 days bounds the
+# staleness of the few remaining unversioned vendor references.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(?:css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|mp3|mp4)$">
+        Header always set Cache-Control "public, max-age=2592000"
+        Header always unset Pragma
+        Header always unset Expires
+    </FilesMatch>
+
+    # The service worker is the one .js that must NOT inherit the 30-day cache
+    # above. It is fetched by URL with no ?v= stamp, so a long-lived CDN/browser
+    # copy pins every visitor to the old script — including its old CACHE name,
+    # which defeats bumping the version. Always revalidate.
+    <FilesMatch "^sw\.js$">
+        Header always set Cache-Control "no-cache, must-revalidate, max-age=0"
+        Header always unset Pragma
+        Header always unset Expires
+    </FilesMatch>
+</IfModule>
+
+# PHP settings live in .user.ini, not here.
+#
+# The cPanel-generated <IfModule php8_module>/<IfModule lsapi_module> blocks that
+# used to sit below were removed: cPanel regenerates them per account (which is
+# why two identical copies had accumulated), they are marked "do not edit", and
+# they hardcoded the generating account's home directory, so every copy of this
+# tree kept logging to a path that did not exist on it.
+#
+# Each module ships its own .user.ini because public/, redirect/ and statistics/
+# are separate document roots — PHP only scans from the script's directory up to
+# its own docroot. If cPanel's MultiPHP INI Editor writes a block back in here,
+# it is harmless: the installer and migrations/008 rewrite the error_log path in
+# it, and env.php's srp_configure_error_log() overrides it at runtime anyway.

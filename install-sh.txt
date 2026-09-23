@@ -1,0 +1,2 @@
+chmod 750 deploy-production.sh inode-snapshot.sh
+./deploy-production.sh

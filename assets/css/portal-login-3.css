@@ -1,0 +1,27 @@
+/* NGIX patch: disable image/background right-click */
+img,picture,svg,canvas,.ngix-image-backdrop,.image-protect,.app-banner,.brand-logo,.logo{
+  -webkit-user-drag:none!important;
+  -webkit-touch-callout:none!important;
+  -webkit-user-select:none!important;
+  user-select:none!important;
+}
+
+/* Unified button appearance — authoritative, keep last. */
+.btn,button,.btn-sm,.btn-xs,.page-link,.page-link--primary,
+input[type=submit],input[type=button],.swal2-confirm,.swal2-cancel{
+    border-color:var(--btn-border)!important;
+    color:var(--btn-fg)!important;
+    background:var(--btn-bg)!important;
+}
+.btn:hover,button:hover,.btn-sm:hover,.btn-xs:hover,.page-link:hover,
+input[type=submit]:hover,input[type=button]:hover{
+    border-color:var(--btn-border)!important;
+    color:var(--btn-fg)!important;
+    background:var(--btn-bg)!important;
+    filter:brightness(1.18);
+}
+.btn:disabled,button:disabled,.btn-sm:disabled,.btn-xs:disabled,
+input[type=submit]:disabled,input[type=button]:disabled{
+    opacity:.55;
+    filter:none;
+}
