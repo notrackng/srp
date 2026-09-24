@@ -463,6 +463,44 @@ if (!function_exists('srp_offer_domains_cache_file')) {
     }
 }
 
+if (!function_exists('srp_offer_domains_cache_dir_is_private')) {
+    /**
+     * Harden (or verify) the shared temp cache directory before any file
+     * inside it is trusted. A predictable path under sys_get_temp_dir() can
+     * be pre-created by another local user/process on a shared host; without
+     * this check, a stale or attacker-planted file (or a symlink pointing
+     * elsewhere) would be read as a trusted allowlist snapshot and later
+     * overwritten in place, poisoning the offer-domain allowlist that both
+     * shortlinks and the internal cloak's SSRF guard rely on.
+     *
+     * Mirrors srp_ensure_private_dir() in redirect/functions.php (adding a
+     * symlink refusal), duplicated here rather than shared because env.php is
+     * the common ancestor both public/ and redirect/ load first and cannot
+     * depend on a redirect/-specific helper.
+     */
+    function srp_offer_domains_cache_dir_is_private(string $dir): bool
+    {
+        $dir = rtrim($dir, DIRECTORY_SEPARATOR);
+        if ($dir === '' || is_link($dir)) {
+            return false;
+        }
+
+        if (!is_dir($dir)) {
+            if (!@mkdir($dir, 0700, true) && !is_dir($dir)) {
+                return false;
+            }
+        }
+
+        @chmod($dir, 0700);
+
+        if (DIRECTORY_SEPARATOR === '/') {
+            return (fileperms($dir) & 0777) === 0700;
+        }
+
+        return true;
+    }
+}
+
 if (!function_exists('srp_offer_allowed_domains_pdo')) {
     /**
      * Lazy, fail-open PDO for the auto-detect allowlist. Deliberately does not
@@ -512,8 +550,9 @@ if (!function_exists('srp_offer_allowed_domains_auto')) {
     {
         $cacheFile = srp_offer_domains_cache_file();
         $cacheTtl = 300;
+        $cacheDirSafe = srp_offer_domains_cache_dir_is_private(dirname($cacheFile));
 
-        if (is_file($cacheFile)) {
+        if ($cacheDirSafe && !is_link($cacheFile) && is_file($cacheFile)) {
             $mtime = filemtime($cacheFile);
             if ($mtime !== false && (time() - $mtime) < $cacheTtl) {
                 $cached = json_decode((string) file_get_contents($cacheFile), true);
@@ -546,10 +585,9 @@ if (!function_exists('srp_offer_allowed_domains_auto')) {
         $domains = array_keys($domains);
         sort($domains);
 
-        if (!is_dir(dirname($cacheFile))) {
-            @mkdir(dirname($cacheFile), 0700, true);
+        if ($cacheDirSafe && !is_link($cacheFile)) {
+            @file_put_contents($cacheFile, json_encode($domains), LOCK_EX);
         }
-        @file_put_contents($cacheFile, json_encode($domains), LOCK_EX);
 
         return $domains;
     }
