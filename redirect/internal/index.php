@@ -28,6 +28,17 @@ if ($route === null) {
     exit;
 }
 
+// Throttle ahead of anything that can reach the DB or the network: route
+// resolution may query the `offering` table, and the fetch is outbound. Placed
+// after the token check so a malformed path costs nothing beyond the charset
+// gate, but before resolution so a flood cannot make us do real work.
+if (internal_rate_exceeded()) {
+    http_response_code(429);
+    header('Retry-After: 60');
+    header('Content-Type: text/plain; charset=UTF-8');
+    exit('Too many requests.');
+}
+
 $destination = internal_resolve_destination($route, internal_fallback_map());
 if ($destination === null) {
     // Route not mapped — indistinguishable from a missing page.
