@@ -665,3 +665,81 @@ function internal_forward_headers(string $userAgent, string $flag): array
 
     return $headers;
 }
+
+// ── Request throttling ────────────────────────────────────────────────────────
+
+/**
+ * Per-IP request ceiling for /internal/v1/*, in requests per minute.
+ *
+ * Mirrors SRP_SHORTEN_RATE_PER_MIN: a generous fixed window that only caps
+ * flooding, and 0 disables the limiter entirely. The default is deliberately
+ * high rather than tight, because this endpoint fetches upstream on the
+ * server's behalf and one masked page view fans out into a separate proxied
+ * request per rewritten origin reference (see internal_rewrite_body) — so a
+ * low ceiling would break ordinary pages long before it inconvenienced abuse.
+ */
+function internal_rate_per_min(): int
+{
+    $raw = trim((string) app_env('INTERNAL_RATE_PER_MIN', '300'));
+    if (!is_numeric($raw)) {
+        return 300;
+    }
+
+    return max(0, (int) $raw);
+}
+
+/**
+ * Fixed-window per-IP rate check for the silent cloak.
+ *
+ * Fail-open on every uncertain path: an unidentifiable client, a cache
+ * directory that cannot be verified private, or an unwritable counter all
+ * return false (request allowed). The limiter must never be the reason a real
+ * visitor is locked out, and it must never throw on the redirect path.
+ *
+ * The window index is part of the filename, so no read-modify-write lock is
+ * needed across window boundaries. Concurrent increments inside a single window
+ * can only under-count, which also errs toward allowing the request.
+ *
+ * Counters live in the shared srp_bb area under the rl_int_ prefix, which
+ * redirect/cleanup-cache.php already sweeps via its rl_ rule.
+ */
+function internal_rate_exceeded(): bool
+{
+    $max = internal_rate_per_min();
+    if ($max <= 0) {
+        return false; // limiter disabled
+    }
+
+    require_once dirname(__DIR__, 2) . '/ip_address.php';
+
+    $ip = getUserIP();
+    if ($ip === '') {
+        return false;
+    }
+
+    // engine.php is loaded by both index.php and verify.php and does not define
+    // SRP_CACHE_DIR_NAME, so fall back rather than assuming redirect/index.php
+    // has already been through here.
+    $dirName = defined('SRP_CACHE_DIR_NAME') ? SRP_CACHE_DIR_NAME : 'srp_bb';
+    $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $dirName;
+
+    if (!srp_offer_domains_cache_dir_is_private($dir)) {
+        return false;
+    }
+
+    $window = (int) (time() / 60);
+    $file = $dir . DIRECTORY_SEPARATOR . 'rl_int_' . md5($ip . '|' . $window) . '.json';
+
+    $count = 0;
+    if (is_file($file) && !is_link($file)) {
+        $data = json_decode((string) @file_get_contents($file), true);
+        if (is_array($data) && isset($data['c']) && is_int($data['c'])) {
+            $count = $data['c'];
+        }
+    }
+
+    $count++;
+    @file_put_contents($file, json_encode(['c' => $count]), LOCK_EX);
+
+    return $count > $max;
+}
