@@ -480,8 +480,8 @@ if ($publicLink === null) {
                     exit;
                 }
 
-                if (!srp_url_is_self($slLongUrl) && !srp_url_host_allowed($slLongUrl)) {
-                    error_log('[srp] legacy shortlink target blocked — host not allowed: ' . strtolower((string) parse_url($slLongUrl, PHP_URL_HOST)));
+                if (srp_url_is_self($slLongUrl) || !srp_url_host_allowed($slLongUrl)) {
+                    error_log('[srp] legacy shortlink target blocked — self/host not allowed: ' . strtolower((string) parse_url($slLongUrl, PHP_URL_HOST)));
                     http_response_code(404);
                     exit;
                 }
