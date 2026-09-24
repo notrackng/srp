@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 /**
  * /internal/v1/{route} — silent cloaking controller.
  * ==================================================
@@ -15,6 +13,8 @@ declare(strict_types=1);
  *   2. Request-header     → ajax/json: relay raw payload untouched
  *   3. URL / path         → browser: rewrite origin references onto the mask
  */
+
+declare(strict_types=1);
 
 error_reporting(E_ALL);
 ini_set('display_errors', '0');

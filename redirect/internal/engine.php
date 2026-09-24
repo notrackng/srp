@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 /**
  * SRP silent cloak — shared engine.
  * ================================
@@ -14,6 +12,8 @@ declare(strict_types=1);
  *   2. Request-header checks       → internal_header_flag()
  *   3. URL / path conditions       → internal_route_token() + internal_resolve_destination()
  */
+
+declare(strict_types=1);
 
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
