@@ -144,21 +144,181 @@ final class RedirectDecisionTest extends TestCase
         );
     }
 
-    public function testOfferDomainAllowlist(): void
+    public function testOfferAllowlistParse(): void
     {
-        // No allowlist configured → allow all valid hosts, reject unparseable.
-        $this->assertTrue(srp_url_host_allowed('https://any.example/path'));
+        // Blank → the override is absent, so the caller falls through to
+        // auto-detection. parse() cannot express that itself; it only reports
+        // an empty list, which is why the caller keys off the raw string.
+        $this->assertSame([], srp_offer_allowlist_parse(''));
+        $this->assertSame([], srp_offer_allowlist_parse('   '));
+
+        // Set but unparseable → explicitly empty, which denies every host.
+        $this->assertSame([], srp_offer_allowlist_parse(','));
+        $this->assertSame([], srp_offer_allowlist_parse(' , , '));
+
+        $this->assertSame(['offers.example'], srp_offer_allowlist_parse(' offers.example '));
+        $this->assertSame(
+            ['offers.example', 'ads.example'],
+            srp_offer_allowlist_parse('offers.example,ads.example'),
+        );
+
+        // Empty segments are dropped, never turned into empty-string entries.
+        $this->assertSame(
+            ['a.example', 'b.example'],
+            srp_offer_allowlist_parse('a.example,, b.example ,'),
+        );
+    }
+
+    public function testOfferHostMatching(): void
+    {
+        $domains = ['offers.example', 'Ads.Example'];
+
+        // Exact and subdomain match, case-insensitive on both sides.
+        $this->assertTrue(srp_offer_host_allowed_by('offers.example', $domains));
+        $this->assertTrue(srp_offer_host_allowed_by('track.offers.example', $domains));
+        $this->assertTrue(srp_offer_host_allowed_by('ads.example', $domains));
+        $this->assertTrue(srp_offer_host_allowed_by('x.y.ads.example', $domains));
+
+        // Suffix match must land on a dot boundary, not a bare string suffix.
+        $this->assertFalse(srp_offer_host_allowed_by('evil.example', $domains));
+        $this->assertFalse(srp_offer_host_allowed_by('notoffers.example', $domains));
+        $this->assertFalse(srp_offer_host_allowed_by('offers.example.evil.example', $domains));
+
+        // An empty list denies. The fail-open for "nothing configured" lives in
+        // srp_url_host_allowed(), which is the only place that can tell "not
+        // configured" apart from "configured to deny everything".
+        $this->assertFalse(srp_offer_host_allowed_by('offers.example', []));
+
+        // Entries that normalise to empty are skipped, not treated as wildcards.
+        $this->assertFalse(srp_offer_host_allowed_by('offers.example', ['', '   ']));
+    }
+
+    public function testOfferDomainAllowlistExplicitOverride(): void
+    {
+        // Unparseable URL has no host at all, so the result is decided before
+        // the allowlist is consulted — independent of ambient state.
         $this->assertFalse(srp_url_host_allowed('not-a-url'));
 
-        putenv('SRP_OFFER_ALLOWED_DOMAINS=offers.example,ads.example');
-        $_ENV['SRP_OFFER_ALLOWED_DOMAINS'] = 'offers.example,ads.example';
+        $this->setAllowlistOverride('offers.example,ads.example');
 
-        $this->assertTrue(srp_url_host_allowed('https://offers.example/x'));
-        $this->assertTrue(srp_url_host_allowed('https://track.offers.example/x'));
-        $this->assertFalse(srp_url_host_allowed('https://evil.example/x'));
+        try {
+            $this->assertTrue(srp_url_host_allowed('https://offers.example/x'));
+            $this->assertTrue(srp_url_host_allowed('https://track.offers.example/x'));
+            $this->assertFalse(srp_url_host_allowed('https://evil.example/x'));
+        } finally {
+            $this->clearAllowlistOverride();
+        }
+    }
 
+    public function testOfferDomainAllowlistEmptyOverrideDeniesEverything(): void
+    {
+        // A set-but-unparseable override is an explicit allow-nothing, NOT a
+        // fail-open. Guards the distinction the old inline code made implicitly.
+        $this->setAllowlistOverride(',');
+
+        try {
+            $this->assertFalse(srp_url_host_allowed('https://offers.example/x'));
+            $this->assertFalse(srp_url_host_allowed('https://any.example/x'));
+        } finally {
+            $this->clearAllowlistOverride();
+        }
+    }
+
+    public function testOfferDomainAllowlistFailsOpenWhenNothingConfigured(): void
+    {
+        // Deterministic fail-open: no override, no cached auto-detect snapshot,
+        // and no DB credentials, so auto-detection cannot yield anything.
+        // Without this the assertion would depend on the live `offering` table
+        // and on a temp-dir cache no test creates — the ambient coupling that
+        // made this test unreproducible.
+        $cacheFile = srp_offer_domains_cache_file();
+        $hadCache = is_file($cacheFile);
+        $previousCache = $hadCache ? (string) file_get_contents($cacheFile) : null;
+
+        $this->clearAllowlistOverride();
+        $this->clearDbCredentials();
+
+        try {
+            @unlink($cacheFile);
+
+            $this->assertTrue(srp_url_host_allowed('https://any.example/path'));
+            $this->assertFalse(srp_url_host_allowed('not-a-url'));
+        } finally {
+            if ($hadCache && $previousCache !== null) {
+                @file_put_contents($cacheFile, $previousCache);
+            } else {
+                @unlink($cacheFile);
+            }
+        }
+    }
+
+    public function testOfferDomainAllowlistAutoDetectSnapshot(): void
+    {
+        // Drives the auto-detect branch from a cache snapshot this test owns,
+        // rather than from whatever the live host happens to have. Skipped when
+        // the shared temp dir cannot be verified private, because then the
+        // snapshot is deliberately ignored and the DB would be consulted.
+        $cacheFile = srp_offer_domains_cache_file();
+
+        if (!srp_offer_domains_cache_dir_is_private(dirname($cacheFile))) {
+            $this->markTestSkipped('auto-detect cache dir is not private in this environment');
+        }
+
+        $hadCache = is_file($cacheFile);
+        $previousCache = $hadCache ? (string) file_get_contents($cacheFile) : null;
+
+        $this->clearAllowlistOverride();
+        $this->clearDbCredentials();
+
+        try {
+            file_put_contents($cacheFile, '["offers.example"]');
+            touch($cacheFile); // keep it inside the 300s TTL
+
+            $this->assertTrue(srp_url_host_allowed('https://offers.example/x'));
+            $this->assertTrue(srp_url_host_allowed('https://track.offers.example/x'));
+            $this->assertFalse(srp_url_host_allowed('https://evil.example/x'));
+        } finally {
+            if ($hadCache && $previousCache !== null) {
+                @file_put_contents($cacheFile, $previousCache);
+            } else {
+                @unlink($cacheFile);
+            }
+        }
+    }
+
+    /**
+     * app_env() reads $_ENV, then $_SERVER, then getenv() with no memoisation,
+     * so all three have to be cleared to reliably remove a value.
+     */
+    private function setAllowlistOverride(string $value): void
+    {
+        putenv('SRP_OFFER_ALLOWED_DOMAINS=' . $value);
+        $_ENV['SRP_OFFER_ALLOWED_DOMAINS'] = $value;
+        $_SERVER['SRP_OFFER_ALLOWED_DOMAINS'] = $value;
+    }
+
+    private function clearAllowlistOverride(): void
+    {
         putenv('SRP_OFFER_ALLOWED_DOMAINS');
-        unset($_ENV['SRP_OFFER_ALLOWED_DOMAINS']);
+        unset(
+            $_ENV['SRP_OFFER_ALLOWED_DOMAINS'],
+            $_SERVER['SRP_OFFER_ALLOWED_DOMAINS'],
+        );
+    }
+
+    private function clearDbCredentials(): void
+    {
+        putenv('DB_USER');
+        putenv('DB_PASSWORD');
+        putenv('DB_NAME');
+        unset(
+            $_ENV['DB_USER'],
+            $_ENV['DB_PASSWORD'],
+            $_ENV['DB_NAME'],
+            $_SERVER['DB_USER'],
+            $_SERVER['DB_PASSWORD'],
+            $_SERVER['DB_NAME'],
+        );
     }
 
     public function testUrlSelfGuard(): void

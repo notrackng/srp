@@ -593,6 +593,61 @@ if (!function_exists('srp_offer_allowed_domains_auto')) {
     }
 }
 
+if (!function_exists('srp_offer_allowlist_parse')) {
+    /**
+     * Parse the SRP_OFFER_ALLOWED_DOMAINS override into a list.
+     *
+     * Pure: no env read, no cache, no DB, so it is directly testable. A
+     * set-but-unparseable value (e.g. ",") yields an empty list, which the
+     * caller must treat as an explicit "allow nothing" rather than a fail-open.
+     * A blank value means the override is absent; parse() cannot distinguish
+     * "absent" from "present but empty", so the caller decides from the raw
+     * string, not from the result.
+     *
+     * @return list<string>
+     */
+    function srp_offer_allowlist_parse(string $raw): array
+    {
+        return array_values(
+            array_filter(
+                array_map('trim', explode(',', $raw)),
+                static fn (string $domain): bool => $domain !== '',
+            ),
+        );
+    }
+}
+
+if (!function_exists('srp_offer_host_allowed_by')) {
+    /**
+     * Whether $host is listed, or is a subdomain of a listed entry.
+     *
+     * Pure: the caller supplies the list, so this is testable without the
+     * `offering` table or the auto-detect cache — the two ambient inputs that
+     * previously made the allowlist behaviour untestable. An empty list matches
+     * nothing (deny); the fail-open decision belongs to the caller, which is the
+     * only place that knows whether an empty list means "not configured" or
+     * "configured to deny everything".
+     *
+     * @param list<string> $domains
+     */
+    function srp_offer_host_allowed_by(string $host, array $domains): bool
+    {
+        $host = strtolower($host);
+
+        foreach ($domains as $domain) {
+            $domain = strtolower(trim((string) $domain));
+            if ($domain === '') {
+                continue;
+            }
+            if ($host === $domain || str_ends_with($host, '.' . $domain)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
 if (!function_exists('srp_url_host_allowed')) {
     /**
      * Whether a URL's host is permitted as the final offer/shortlink destination.
@@ -604,6 +659,11 @@ if (!function_exists('srp_url_host_allowed')) {
      *      preserving legacy fail-open behaviour.
      *
      * Matches the exact domain and any of its subdomains.
+     *
+     * The two branches deliberately differ on an empty result: an explicit
+     * override that parses to nothing denies every host, while auto-detection
+     * finding nothing falls open. Only this function can tell those apart, so
+     * the fail-open lives here and never in the pure helpers above.
      */
     function srp_url_host_allowed(string $url): bool
     {
@@ -614,28 +674,15 @@ if (!function_exists('srp_url_host_allowed')) {
 
         $raw = trim((string) app_env('SRP_OFFER_ALLOWED_DOMAINS', ''));
         if ($raw !== '') {
-            $domains = array_filter(
-                array_map('trim', explode(',', $raw)),
-                static fn (string $domain): bool => $domain !== '',
-            );
-        } else {
-            $domains = srp_offer_allowed_domains_auto();
-            if ($domains === []) {
-                return true; // no explicit allowlist and none detectable → allow all
-            }
+            return srp_offer_host_allowed_by($host, srp_offer_allowlist_parse($raw));
         }
 
-        foreach ($domains as $domain) {
-            $domain = strtolower(trim($domain));
-            if ($domain === '') {
-                continue;
-            }
-            if ($host === $domain || str_ends_with($host, '.' . $domain)) {
-                return true;
-            }
+        $domains = srp_offer_allowed_domains_auto();
+        if ($domains === []) {
+            return true; // no explicit allowlist and none detectable → allow all
         }
 
-        return false;
+        return srp_offer_host_allowed_by($host, $domains);
     }
 }
 
