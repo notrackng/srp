@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 /**
  * CLI reachability harness:  php internal/verify.php <route> [host]
  * =================================================================
@@ -13,6 +11,8 @@ declare(strict_types=1);
  * Exit codes: 0 = reachable (2xx/3xx), 1 = fetch failed or bad status,
  *             2 = usage / validation / self-loop.
  */
+
+declare(strict_types=1);
 
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
