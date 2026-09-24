@@ -103,6 +103,7 @@ function adminCampaignInsert(PDO $pdo, array $params): void
         throw new RuntimeException('Failed to prepare insert query.');
     }
     $stmt->execute(['country_code' => $countryCode, 'offer' => $offer, 'ua' => $ua, 'network' => $network]);
+    @unlink(srp_offer_domains_cache_file());
 
     echo json_encode(['ok' => true], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
 }
@@ -124,6 +125,7 @@ function adminCampaignUpdate(PDO $pdo, array $params): void
         throw new RuntimeException('Failed to prepare update query.');
     }
     $stmt->execute(['country_code' => $countryCode, 'ua' => $ua, 'offer' => $offer, 'network' => $network, 'id' => $id]);
+    @unlink(srp_offer_domains_cache_file());
 
     echo json_encode(['ok' => true], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
 }
@@ -140,6 +142,7 @@ function adminCampaignDelete(PDO $pdo, array $params): void
         throw new RuntimeException('Failed to prepare delete query.');
     }
     $stmt->execute(['id' => $id]);
+    @unlink(srp_offer_domains_cache_file());
 
     echo json_encode(['ok' => true], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
 }
