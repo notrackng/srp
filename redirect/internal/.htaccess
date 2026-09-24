@@ -1,0 +1,19 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Silent internal rewrite for the /internal/v1/* cloak.
+#
+# Requests keep /internal/v1/{route} in the address bar. Apache hands them to
+# index.php INTERNALLY — no [R] flag, so there is no 302 and no URL change.
+# The real destination is resolved server-side only (see engine.php) and is
+# never exposed to the client.
+#
+# Nginx equivalent (server block):
+#   location ~ ^/internal/v1/([a-zA-Z0-9._-]+)/?$ {
+#       rewrite ^ /internal/index.php?route=$1 last;
+#   }
+# ─────────────────────────────────────────────────────────────────────────────
+
+RewriteEngine On
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^v1/([a-zA-Z0-9._-]+)/?$ index.php?route=$1 [QSA,L]

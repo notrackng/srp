@@ -35,10 +35,10 @@ $scheme  = strtolower((string) parse_url($longUrl, PHP_URL_SCHEME));
 $target  = null;
 
 if (filter_var($longUrl, FILTER_VALIDATE_URL) !== false && $scheme === 'https') {
-    if (srp_url_is_self($longUrl) || srp_url_host_allowed($longUrl)) {
+    if (!srp_url_is_self($longUrl) && srp_url_host_allowed($longUrl)) {
         $target = $longUrl;
     } else {
-        error_log('[srp] shortlink target blocked — host not allowed: ' . strtolower((string) parse_url($longUrl, PHP_URL_HOST)));
+        error_log('[srp] shortlink target blocked — self/host not allowed: ' . strtolower((string) parse_url($longUrl, PHP_URL_HOST)));
     }
 }
 

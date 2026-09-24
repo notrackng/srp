@@ -451,12 +451,121 @@ if (!function_exists('srp_request_is_https')) {
     }
 }
 
+if (!function_exists('srp_offer_domains_cache_file')) {
+    /**
+     * Shared temp file backing the auto-detected offer allowlist.
+     */
+    function srp_offer_domains_cache_file(): string
+    {
+        $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'srp_bb';
+
+        return $dir . DIRECTORY_SEPARATOR . 'offer_domains.json';
+    }
+}
+
+if (!function_exists('srp_offer_allowed_domains_pdo')) {
+    /**
+     * Lazy, fail-open PDO for the auto-detect allowlist. Deliberately does not
+     * reuse connection_pdo.php, which exits the request on connect failure — an
+     * allowlist lookup must never take the redirect down with it.
+     */
+    function srp_offer_allowed_domains_pdo(): ?PDO
+    {
+        static $pdo = false;
+        if ($pdo === false) {
+            try {
+                $user = app_env('DB_USER', '');
+                $name = app_env('DB_NAME', '');
+                if ($user === null || $user === '' || $name === null || $name === '') {
+                    $pdo = null;
+                } else {
+                    $host = app_env('DB_HOST', 'localhost') ?? 'localhost';
+                    $port = (int) (app_env('DB_PORT', '3306') ?? '3306');
+                    $pass = (string) app_env('DB_PASSWORD', '');
+                    $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $name);
+                    $pdo = new PDO($dsn, $user, $pass, [
+                        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                        PDO::ATTR_EMULATE_PREPARES => false,
+                        PDO::ATTR_TIMEOUT => 5,
+                    ]);
+                }
+            } catch (Throwable) {
+                $pdo = null;
+            }
+        }
+
+        return $pdo;
+    }
+}
+
+if (!function_exists('srp_offer_allowed_domains_auto')) {
+    /**
+     * Auto-detected offer allowlist: the distinct host names of the campaign
+     * URLs in the `offering` table. Cached in the shared temp dir for a short
+     * TTL so the DB is not queried on every redirect. Returns [] when the DB is
+     * unreachable or no campaign exists (the caller fails open to allow-all).
+     *
+     * @return list<string>
+     */
+    function srp_offer_allowed_domains_auto(): array
+    {
+        $cacheFile = srp_offer_domains_cache_file();
+        $cacheTtl = 300;
+
+        if (is_file($cacheFile)) {
+            $mtime = filemtime($cacheFile);
+            if ($mtime !== false && (time() - $mtime) < $cacheTtl) {
+                $cached = json_decode((string) file_get_contents($cacheFile), true);
+                if (is_array($cached)) {
+                    return array_values(array_map('strval', $cached));
+                }
+            }
+        }
+
+        $domains = [];
+        $pdo = srp_offer_allowed_domains_pdo();
+        if ($pdo !== null) {
+            try {
+                $statement = $pdo->query('SELECT offer FROM offering');
+                if ($statement !== false) {
+                    while (($row = $statement->fetch()) !== false) {
+                        $offer = is_string($row['offer'] ?? null) ? $row['offer'] : '';
+                        $offer = trim(html_entity_decode($offer, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                        $host = strtolower((string) parse_url($offer, PHP_URL_HOST));
+                        if ($host !== '') {
+                            $domains[$host] = true;
+                        }
+                    }
+                }
+            } catch (Throwable $e) {
+                error_log('[srp] offer allowlist auto-detect failed: ' . $e->getMessage());
+            }
+        }
+
+        $domains = array_keys($domains);
+        sort($domains);
+
+        if (!is_dir(dirname($cacheFile))) {
+            @mkdir(dirname($cacheFile), 0700, true);
+        }
+        @file_put_contents($cacheFile, json_encode($domains), LOCK_EX);
+
+        return $domains;
+    }
+}
+
 if (!function_exists('srp_url_host_allowed')) {
     /**
-     * Whether a URL's host is permitted by the optional SRP_OFFER_ALLOWED_DOMAINS
-     * allowlist (comma-separated domains). Empty/missing allowlist = allow all,
-     * preserving existing behaviour until the operator opts in. Matches the
-     * exact domain and any of its subdomains.
+     * Whether a URL's host is permitted as the final offer/shortlink destination.
+     *
+     * Priority:
+     *   1. SRP_OFFER_ALLOWED_DOMAINS (comma-separated) — explicit override.
+     *   2. Auto-detected from the campaign URLs (`offering` table).
+     *   3. Neither set nor detectable (no campaigns / DB down) — allow all,
+     *      preserving legacy fail-open behaviour.
+     *
+     * Matches the exact domain and any of its subdomains.
      */
     function srp_url_host_allowed(string $url): bool
     {
@@ -466,11 +575,19 @@ if (!function_exists('srp_url_host_allowed')) {
         }
 
         $raw = trim((string) app_env('SRP_OFFER_ALLOWED_DOMAINS', ''));
-        if ($raw === '') {
-            return true;
+        if ($raw !== '') {
+            $domains = array_filter(
+                array_map('trim', explode(',', $raw)),
+                static fn (string $domain): bool => $domain !== '',
+            );
+        } else {
+            $domains = srp_offer_allowed_domains_auto();
+            if ($domains === []) {
+                return true; // no explicit allowlist and none detectable → allow all
+            }
         }
 
-        foreach (explode(',', $raw) as $domain) {
+        foreach ($domains as $domain) {
             $domain = strtolower(trim($domain));
             if ($domain === '') {
                 continue;
@@ -505,7 +622,7 @@ if (!function_exists('srp_url_is_self')) {
         $self = preg_replace('/^www\./', '', $self) ?? $self;
         $self = trim($self, '.');
 
-        return $self !== '' && $host === $self;
+        return $self !== '' && ($host === $self || str_ends_with($host, '.' . $self));
     }
 }
 
