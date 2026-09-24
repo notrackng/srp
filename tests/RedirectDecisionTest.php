@@ -124,6 +124,26 @@ final class RedirectDecisionTest extends TestCase
         );
     }
 
+    public function testTrafficDecisionDegradedReputationDoesNotCloakOnUnknownSignals(): void
+    {
+        // MaxMind / reputation outage or lookup failure: null means "unknown",
+        // not "blocked". A degraded upstream must not cloak legitimate traffic.
+        $this->assertSame(
+            ['action' => 'REDIRECT', 'reason' => 'normal'],
+            srp_traffic_decision(false, true, false, null, null, 'direct', false, null),
+        );
+
+        $this->assertSame(
+            ['action' => 'REDIRECT', 'reason' => 'normal'],
+            srp_traffic_decision(false, true, false, false, null, 'direct', false, null),
+        );
+
+        $this->assertSame(
+            ['action' => 'REDIRECT', 'reason' => 'normal'],
+            srp_traffic_decision(false, true, false, null, false, 'direct', false, null),
+        );
+    }
+
     public function testOfferDomainAllowlist(): void
     {
         // No allowlist configured → allow all valid hosts, reject unparseable.
