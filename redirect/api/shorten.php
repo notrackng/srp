@@ -8,6 +8,7 @@ load_env_file(dirname(__DIR__, 2) . '/.env');
 
 require_once dirname(__DIR__, 2) . '/Base64URL.php';
 require_once dirname(__DIR__, 2) . '/login_throttle.php';
+require_once __DIR__ . '/../functions.php';
 require_once __DIR__ . '/../public_link.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -242,12 +243,19 @@ function srp_shorten_rate_exceeded(int $maxPerMinute): bool
 
     $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
         . (defined('SRP_CACHE_DIR_NAME') ? SRP_CACHE_DIR_NAME : 'srp_bb');
-    if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+    if (!srp_ensure_private_dir($dir)) {
         return false;
     }
 
+    // The counter filename is fully predictable (md5 of the client IP and the
+    // current 60s window), so a pre-planted symlink at this exact path is a
+    // realistic attack on shared hosting, not just a directory-level one —
+    // refuse it rather than write attacker-chosen content through it.
     $window = (int) (time() / 60);
     $file   = $dir . DIRECTORY_SEPARATOR . 'rl_shorten_' . md5($ip . '|' . $window) . '.json';
+    if (is_link($file)) {
+        return false;
+    }
 
     $count = 0;
     if (is_file($file)) {
@@ -258,7 +266,7 @@ function srp_shorten_rate_exceeded(int $maxPerMinute): bool
     }
 
     $count++;
-    @file_put_contents($file, json_encode(['c' => $count]), LOCK_EX);
+    srp_write_private_file($file, (string) json_encode(['c' => $count]));
 
     return $count > $maxPerMinute;
 }

@@ -320,7 +320,17 @@ function srp_shortlinks_find(PDO $pdo, string $code): ?array
     $cacheFile   = $cacheDir . DIRECTORY_SEPARATOR . 'sl_' . md5($code) . '.json';
     $cacheTtl    = 300; // 5 minutes
 
-    if (is_file($cacheFile)) {
+    // Verified once up front and reused for both the read and the write below:
+    // a predictable path under sys_get_temp_dir() can be pre-created (as a
+    // world-writable directory, or a symlink) by another local user/process on
+    // a shared host, before this code ever runs. Trusting whatever is already
+    // there — on the read side as much as the write side — would mean serving
+    // (and then re-caching) an attacker-planted long_url. When the directory
+    // can't be verified private, the cache is skipped entirely rather than
+    // trusted; the lookup just falls through to the DB every time.
+    $cacheDirSafe = srp_ensure_private_dir($cacheDir);
+
+    if ($cacheDirSafe && !is_link($cacheFile) && is_file($cacheFile)) {
         $mtime = filemtime($cacheFile);
         if ($mtime !== false && (time() - $mtime) < $cacheTtl) {
             $cached = json_decode((string) file_get_contents($cacheFile), true);
@@ -360,14 +370,12 @@ function srp_shortlinks_find(PDO $pdo, string $code): ?array
     }
 
     // Cache both hits and misses to prevent DB hammering for non-existent codes.
-    if (!is_dir($cacheDir)) {
-        @mkdir($cacheDir, 0700, true);
+    if ($cacheDirSafe && !is_link($cacheFile)) {
+        srp_write_private_file(
+            $cacheFile,
+            (string) json_encode($result ?? ['__miss' => true, 'long_url' => '']),
+        );
     }
-    @file_put_contents(
-        $cacheFile,
-        json_encode($result ?? ['__miss' => true, 'long_url' => '']),
-        LOCK_EX,
-    );
 
     return $result;
 }

@@ -938,11 +938,15 @@ function srp_blackbox_lookup(string $ip): ?bool
  */
 function srp_blackbox_remember(string $cacheDir, string $cacheFile, ?bool $result): ?bool
 {
-    if (!is_dir($cacheDir)) {
-        @mkdir($cacheDir, 0700, true);
+    // srp_ensure_private_dir() re-verifies/re-chmods an already-existing
+    // directory instead of trusting it on sight, and srp_write_private_file()
+    // writes via tempnam()+rename rather than a direct file_put_contents() —
+    // both close the same predictable-shared-temp-path poisoning window the
+    // other srp_bb cache writers in this codebase (GeoResolver, the rate
+    // limiter, srp_short_link_find()) already guard against.
+    if (srp_ensure_private_dir($cacheDir) && !is_link($cacheFile)) {
+        srp_write_private_file($cacheFile, (string) json_encode(['r' => $result]));
     }
-
-    @file_put_contents($cacheFile, json_encode(['r' => $result]), LOCK_EX);
 
     return $result;
 }
