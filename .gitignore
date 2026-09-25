@@ -5,6 +5,9 @@
 # (see INSTALL.md); shipping one would let anyone reach the installer.
 install.token
 
+# Same idea, gating the first-run setup of statistics/report-password.php.
+report_password.token
+
 # Marks a completed install — written by public/install.php's finalize step.
 install.lock
 
