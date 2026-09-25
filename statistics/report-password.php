@@ -17,6 +17,18 @@ const AUTH_SESSION_KEY = 'report_password_auth';
 const LOGIN_MAX_ATTEMPTS = 5;
 const MIN_PASSWORD_LENGTH = 5;
 
+/**
+ * Pre-shared secret gating first-run setup, mirroring public/install.php's
+ * install.token: before AUTH_FILE exists, action=setup is completely
+ * unauthenticated (it is, by definition, how the very first admin password
+ * gets created) — whoever reaches this page first wins it. install.php closes
+ * that exact race with a token file the operator drops on disk out of band;
+ * this does the same for the report-password bootstrap.
+ */
+const SETUP_TOKEN_FILE = __DIR__ . '/../report_password.token';
+const SETUP_TOKEN_SESSION_KEY = 'report_password_setup_token_verified';
+const SETUP_TOKEN_THROTTLE_SCOPE = 'report_password_setup_token';
+
 function configureSecurityHeaders(string $nonce): void
 {
     header('Content-Type: text/html; charset=UTF-8');
@@ -155,6 +167,55 @@ function loadAuthConfig(): array
     }
 
     return $config;
+}
+
+/**
+ * The pre-shared setup token, or null when the file is absent/unreadable or
+ * shorter than 32 chars — the same minimum
+ * `php -r "echo bin2hex(random_bytes(32));" > report_password.token`
+ * produces, matching install.token's own minimum, so a placeholder or
+ * truncated value can never gate the real secret.
+ */
+function readSetupToken(): ?string
+{
+    if (!is_file(SETUP_TOKEN_FILE) || !is_readable(SETUP_TOKEN_FILE)) {
+        return null;
+    }
+
+    $token = trim((string) @file_get_contents(SETUP_TOKEN_FILE));
+
+    return strlen($token) >= 32 ? $token : null;
+}
+
+function isSetupTokenVerified(): bool
+{
+    return isset($_SESSION[SETUP_TOKEN_SESSION_KEY]) && $_SESSION[SETUP_TOKEN_SESSION_KEY] === true;
+}
+
+/**
+ * Verify a POSTed setup token against the on-disk secret, throttled per IP
+ * (matches attemptLogin()'s LOGIN_MAX_ATTEMPTS/lockout model via the same
+ * shared file throttle). On success marks the session so action=setup
+ * becomes reachable for the rest of it.
+ */
+function verifySetupToken(string $provided, string $expectedToken): bool
+{
+    $state = srp_login_throttle_state(SETUP_TOKEN_THROTTLE_SCOPE);
+
+    if ($state['fails'] >= LOGIN_MAX_ATTEMPTS && (time() - $state['last']) < srp_login_lockout_seconds($state['fails'])) {
+        return false;
+    }
+
+    if ($provided === '' || !hash_equals($expectedToken, $provided)) {
+        srp_login_throttle_register_fail(SETUP_TOKEN_THROTTLE_SCOPE);
+
+        return false;
+    }
+
+    srp_login_throttle_reset(SETUP_TOKEN_THROTTLE_SCOPE);
+    $_SESSION[SETUP_TOKEN_SESSION_KEY] = true;
+
+    return true;
 }
 
 function validatePassword(string $value, string $label): array
@@ -409,6 +470,22 @@ $redirectSelf = $self !== '' ? $self : './';
 $authExists = is_file(AUTH_FILE);
 $currentPassword = isAuthenticated() ? loadCurrentPassword() : '';
 
+// Setup-token gate, only relevant before AUTH_FILE exists: action=setup is
+// otherwise reachable by whoever gets here first, with nothing to prove they
+// are the real operator. A missing token file means this page does not exist
+// to this visitor at all (same as install.php without install.token) — the
+// operator must drop report_password.token on disk out of band before setup
+// is reachable by anyone, including them.
+$setupToken = null;
+if (!$authExists) {
+    $setupToken = readSetupToken();
+
+    if ($setupToken === null) {
+        http_response_code(404);
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (!verifyCsrf($_POST['csrf_token'] ?? null)) {
@@ -417,9 +494,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $action = isset($_POST['action']) && is_string($_POST['action']) ? $_POST['action'] : '';
 
-        if ($action === 'setup') {
+        if ($action === 'verify_setup_token') {
             if ($authExists) {
                 throw new RuntimeException('Setup is already locked.');
+            }
+
+            $postedToken = isset($_POST['setup_token']) && is_string($_POST['setup_token'])
+                ? trim($_POST['setup_token'])
+                : '';
+
+            if (!verifySetupToken($postedToken, (string) $setupToken)) {
+                throw new RuntimeException('Invalid setup token.');
+            }
+
+            rotateCsrfToken();
+
+            $statusType = 'ok';
+            $statusMessage = 'Setup token accepted.';
+        } elseif ($action === 'setup') {
+            if ($authExists) {
+                throw new RuntimeException('Setup is already locked.');
+            }
+
+            if (!isSetupTokenVerified()) {
+                throw new RuntimeException('Setup token required.');
             }
 
             $postedPassword = isset($_POST['password']) && is_string($_POST['password'])
@@ -434,6 +532,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             setupAuth($cleanPassword);
             rotateCsrfToken();
+            unset($_SESSION[SETUP_TOKEN_SESSION_KEY]);
 
             $authExists = true;
             $statusType = 'ok';
@@ -511,6 +610,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 || $message === 'Invalid password.'
                 || $message === 'Unauthorized request.'
                 || $message === 'Invalid action.'
+                || $message === 'Invalid setup token.'
+                || $message === 'Setup token required.'
                 || str_starts_with($message, 'Too many failed attempts. Try again in ')
             ) {
                 $safeMessage = $message;
@@ -575,7 +676,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             <?php endif; ?>
 
-            <?php if (!$authExists) : ?>
+            <?php if (!$authExists && !isSetupTokenVerified()) : ?>
+                <form action="<?= h($self) ?>" method="post" autocomplete="off">
+                    <input type="hidden" name="csrf_token" value="<?= h(csrfToken()) ?>">
+                    <input type="hidden" name="action" value="verify_setup_token">
+                    <div class="input-group">
+                        <div class="pw-wrap">
+                            <input type="password" class="form-control input-sm" id="pw-field" name="setup_token" autocomplete="off" required autofocus placeholder="report_password.token contents">
+                            <?= pwToggleButton() ?>
+                        </div>
+                        <span class="input-group-btn">
+                            <button class="btn btn-default btn-sm" type="submit"><strong>Continue</strong></button>
+                        </span>
+                    </div>
+                </form>
+                <p class="hint">First-run setup is gated by report_password.token on disk, next to .env. Generate one with: <code>php -r "echo bin2hex(random_bytes(32));" &gt; report_password.token</code></p>
+
+            <?php elseif (!$authExists) : ?>
                 <form action="<?= h($self) ?>" method="post" autocomplete="off">
                     <input type="hidden" name="csrf_token" value="<?= h(csrfToken()) ?>">
                     <input type="hidden" name="action" value="setup">
