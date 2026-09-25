@@ -220,7 +220,6 @@ startAdminSession();
 
 $nonce = base64_encode(random_bytes(18));
 $csrfToken = adminCsrfToken();
-$adminPassword = defined('ADMIN_PASSWORD') ? (string) ADMIN_PASSWORD : '';
 
 header('Content-Type: text/html; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -284,22 +283,14 @@ if (isset($_POST['access_password'])) {
         showLoginPasswordProtect('csrf', $nonce, $csrfToken);
     }
 
-    $isValid = false;
-    if ($adminPassword !== '') {
-        if (preg_match('/^\$2y\$|^\$argon2/i', $adminPassword) === 1) {
-            $isValid = password_verify($pass, $adminPassword);
-        } else {
-            $isValid = hash_equals($adminPassword, $pass);
-        }
-    }
+    // srp_env_secret_matches() checks ADMIN_PASSWORD_HASH (preferred, bcrypt/
+    // argon2) before falling back to the plaintext ADMIN_PASSWORD var — public/
+    // install.php only ever writes the *_HASH variant, so reading the plain var
+    // alone (the previous behaviour here) left the admin panel unreachable
+    // after a fresh install.
+    $isValid = srp_env_secret_matches('ADMIN_PASSWORD', $pass);
 
-    if (
-        !$isValid
-        && defined('A2ROOT_PASSWORD')
-        && is_string(A2ROOT_PASSWORD)
-        && A2ROOT_PASSWORD !== ''
-        && hash_equals(A2ROOT_PASSWORD, $pass)
-    ) {
+    if (!$isValid && srp_env_secret_matches('A2ROOT_PASSWORD', $pass)) {
         $isValid = true;
     }
 
