@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/../functions.php';
 require_once __DIR__ . '/../redirect_payload.php';
 require_once __DIR__ . '/../sanitize.php';
 
@@ -63,11 +64,20 @@ if (random_int(0, 99) === 0) {
 }
 
 try {
+    // Verified once, before either the replay check or the marker write below:
+    // a predictable path under sys_get_temp_dir() can be pre-created (as a
+    // world-writable directory, or a symlink) by another local user/process on
+    // a shared host. When it can't be verified private, dedup is skipped for
+    // this request rather than trusted — worst case is an extra click counted,
+    // never a poisoned marker trusted or written through.
+    $dedupDirSafe = srp_ensure_private_dir($dedupDir);
+
     // Dedup: skip click increment if same click_id+date+ip seen within 5 min.
     // Prevents accidental replay (bot re-crawl, refresh) and deliberate spam.
     $dedupKey  = 'click_' . md5($recordUrl . $clickDate . $ipAddress);
     $dedupFile = $dedupDir . DIRECTORY_SEPARATOR . $dedupKey . '.json';
-    $isReplay  = is_file($dedupFile) && filemtime($dedupFile) > (time() - $dedupTtl);
+    $isReplay  = $dedupDirSafe && !is_link($dedupFile)
+        && is_file($dedupFile) && filemtime($dedupFile) > (time() - $dedupTtl);
 
     if (!$isReplay) {
         // clickrecord is provisioned by the installer (schema.sql); the previous
@@ -110,10 +120,9 @@ try {
         $pdo->commit();
 
         // Persist dedup marker
-        if (!is_dir($dedupDir)) {
-            @mkdir($dedupDir, 0700, true);
+        if ($dedupDirSafe && !is_link($dedupFile)) {
+            @touch($dedupFile);
         }
-        @touch($dedupFile);
     }
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
