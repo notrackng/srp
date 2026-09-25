@@ -130,6 +130,40 @@ if (!function_exists('app_env')) {
     }
 }
 
+if (!function_exists('srp_env_secret_matches')) {
+    /**
+     * Verify a candidate plaintext against an operator-configured secret that
+     * may be stored either as a bcrypt/argon2 hash (under "{$key}_HASH",
+     * preferred per .env.example) or as plaintext (under "{$key}"). Returns
+     * false when neither is configured, so a missing secret always fails
+     * closed rather than matching an empty candidate.
+     *
+     * Centralizes what public/login.php's ADMIN_PASSWORD check already did
+     * inline (auto-detect a bcrypt/argon2 value and use password_verify(),
+     * otherwise hash_equals()) so every "{$key}_HASH"-configurable secret —
+     * A2ROOT_PASSWORD in particular, checked in three separate files — gets
+     * the same hash-aware comparison instead of a raw hash_equals() that can
+     * never match a hash. public/install.php writes the "_HASH" variant for
+     * ADMIN_PASSWORD/A2ROOT_PASSWORD/ENV_EDITOR_PASSWORD; before this helper
+     * existed, nothing outside install.php's own write ever read that key
+     * back, so a fresh install left the admin login unreachable until an
+     * operator manually set the plaintext var themselves.
+     */
+    function srp_env_secret_matches(string $key, string $candidate): bool
+    {
+        $hash = trim((string) app_env($key . '_HASH', ''));
+        if ($hash !== '') {
+            return preg_match('/^\$2y\$|^\$argon2/i', $hash) === 1
+                ? password_verify($candidate, $hash)
+                : hash_equals($hash, $candidate);
+        }
+
+        $plain = (string) app_env($key, '');
+
+        return $plain !== '' && hash_equals($plain, $candidate);
+    }
+}
+
 if (!function_exists('app_required_env')) {
     function app_required_env(string $key): string
     {
