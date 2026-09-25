@@ -196,6 +196,20 @@ function meetup_sanitize_offer_url(string $value): ?string
         return null;
     }
 
+    // Self-referral guard: an offering.offer row pointing back at this domain
+    // would loop the paying click back into the app instead of an advertiser.
+    // Matches the same check public/s.php and the legacy-shortlink branch of
+    // redirect/index.php apply to their final redirect target — this is that
+    // same class of destination and deserves the same guard. Checked before
+    // the shared allowlist on purpose: srp_url_host_allowed() auto-detects its
+    // domain list FROM the offering table when no explicit allowlist is set,
+    // so a self-pointing offer row would otherwise auto-allowlist itself.
+    if (srp_url_is_self($value)) {
+        error_log('[srp] offer target blocked — points back at this domain: ' . strtolower((string) parse_url($value, PHP_URL_HOST)));
+
+        return null;
+    }
+
     if (!srp_url_host_allowed($value)) {
         error_log('[srp] offer target blocked — host not in SRP_OFFER_ALLOWED_DOMAINS: ' . strtolower((string) parse_url($value, PHP_URL_HOST)));
 

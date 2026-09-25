@@ -7,6 +7,8 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
+require_once __DIR__ . '/functions.php';
+
 /**
  * Cache cleanup — run via cron daily:
  *   0 2 * * * php /path/to/redirect/cleanup-cache.php
@@ -47,12 +49,13 @@ const CACHE_DIR_NAME = 'srp_bb';
 $cacheDir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR)
     . DIRECTORY_SEPARATOR . CACHE_DIR_NAME;
 
-if (!is_dir($cacheDir)) {
-    if (!mkdir($cacheDir, 0750, true) && !is_dir($cacheDir)) {
-        fwrite(STDERR, 'Cannot create cache directory: ' . $cacheDir . PHP_EOL);
-        exit(1);
-    }
-    echo 'Created cache directory: ' . $cacheDir . PHP_EOL;
+// srp_ensure_private_dir() also re-chmods an already-existing directory to
+// 0700 instead of trusting whatever is already there (this script's own
+// previous 0750 was looser than every other writer of this shared path, and
+// none of them re-verified an existing directory's permissions either).
+if (!srp_ensure_private_dir($cacheDir)) {
+    fwrite(STDERR, 'Cannot create or verify private cache directory: ' . $cacheDir . PHP_EOL);
+    exit(1);
 }
 
 $now = time();
