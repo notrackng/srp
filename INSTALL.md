@@ -173,8 +173,21 @@ r.<domain>  → <root>/redirect
 *.<domain>  → <root>/redirect   (wildcard, terakhir)
 ```
 
-**5. Password report** — buka `https://s.<domain>/report-password.php` (form
-"create password" muncul selama `report_auth.php` belum ada).
+**5. Password report** — sebelum `report_auth.php` ada, halaman ini digerbangi
+`report_password.token` (mekanisme sama dengan `install.token` di Langkah 2:
+tanpanya halaman membalas **404**, bukan menampilkan form setup ke siapa pun
+yang lebih dulu sampai):
+
+```bash
+cd <root>
+php -r "echo bin2hex(random_bytes(32));" > report_password.token
+chmod 600 report_password.token
+```
+
+Buka `https://s.<domain>/report-password.php`, tempel isi
+`report_password.token` di prompt yang muncul, lalu buat password admin.
+Setelah `report_auth.php` tercipta, token tidak lagi diperiksa — hapus
+`report_password.token` setelah selesai.
 
 **6. Cron:**
 
@@ -309,6 +322,7 @@ membawa setting saat dibuat.
   Rotasi lewat `migrations/010_rotate_cf_token_enc_key.php` (re-enkripsi dulu,
   baru ubah `.env` — lihat komentar di file tersebut untuk urutan lengkap).
 - `statistics/report_auth.php` gitignored, jangan pernah dikirim.
+- `install.token` dan `report_password.token` gitignored — hapus dari server setelah setup selesai.
 - `.env` tidak pernah di-commit.
 - `migrations/` dan `tests/` diblok dari HTTP.
 - Semua login melewati throttle per-IP (`login_throttle.php`).
@@ -321,6 +335,7 @@ membawa setting saat dibuat.
 | --- | --- |
 | `install.php` 403 | `install.lock` sudah ada — hapus untuk instal ulang |
 | `install.php` 404 | `install.token` belum ada / kurang dari 32 karakter — buat ulang (Langkah 2) |
+| `report-password.php` 404 | `report_auth.php` belum ada DAN `report_password.token` belum ada / kurang dari 32 karakter — buat ulang (Langkah 5) |
 | Import schema disabled | Test connection belum sukses |
 | `pdo_mysql` gagal | Aktifkan di cPanel → Select PHP Version |
 | Cron menolak path | Harus absolut (`/usr/local/bin/php`) |
