@@ -146,9 +146,26 @@ final class RedirectDecisionTest extends TestCase
 
     public function testOfferDomainAllowlist(): void
     {
-        // No allowlist configured → allow all valid hosts, reject unparseable.
+        // With SRP_OFFER_ALLOWED_DOMAINS unset, srp_url_host_allowed() falls
+        // back to srp_offer_allowed_domains_auto(), which queries the live
+        // `offering` table via DB_USER/DB_NAME and caches the result on disk.
+        // Force both DB_USER and DB_NAME empty ($_ENV wins over getenv() in
+        // app_env()'s lookup order) so this assertion is "allow all because
+        // auto-detect is unreachable", not "allow all because the offering
+        // table happens to be empty right now" — deterministic regardless of
+        // what .env or the real database contain. Also clear the on-disk
+        // cache so a previous process's run can't leak a stale result in.
+        $_ENV['DB_USER'] = '';
+        $_ENV['DB_NAME'] = '';
+        @unlink(srp_offer_domains_cache_file());
+
+        // No allowlist configured, auto-detect unreachable → allow all valid
+        // hosts, reject unparseable.
         $this->assertTrue(srp_url_host_allowed('https://any.example/path'));
         $this->assertFalse(srp_url_host_allowed('not-a-url'));
+
+        @unlink(srp_offer_domains_cache_file());
+        unset($_ENV['DB_USER'], $_ENV['DB_NAME']);
 
         putenv('SRP_OFFER_ALLOWED_DOMAINS=offers.example,ads.example');
         $_ENV['SRP_OFFER_ALLOWED_DOMAINS'] = 'offers.example,ads.example';
