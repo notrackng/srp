@@ -85,7 +85,11 @@ if (!isset($_SESSION['csrf_login']) || !is_string($_SESSION['csrf_login'])) {
 }
 
 $csrfToken = $_SESSION['csrf_login'];
-$a2rootPw = (string) app_env('A2ROOT_PASSWORD', '');
+// Checked against both the plaintext and *_HASH variants (srp_env_secret_matches()
+// resolves whichever is set) — a hash-only configuration must count as "configured"
+// too, not just the plaintext var.
+$a2rootConfigured = (string) app_env('A2ROOT_PASSWORD_HASH', '') !== ''
+    || (string) app_env('A2ROOT_PASSWORD', '') !== '';
 $error = '';
 
 // Submitted tracker id (empty = admin login). is_string guard keeps it a real
@@ -95,7 +99,7 @@ $subIdInput = is_string($rawSubIdInput) ? strtoupper(trim($rawSubIdInput)) : '';
 
 // If no password is configured at all, redirect to the setup page.
 // This prevents a permanently broken login form on fresh installs.
-if (!defined('REPASS') && $a2rootPw === '') {
+if (!defined('REPASS') && !$a2rootConfigured) {
     header('Location: ' . statUrl('/report-password.php'));
     exit;
 }
@@ -170,7 +174,7 @@ if (isset($_POST['password'])) {
         $statLockout === 0
         && (
             (defined('REPASS') && password_verify($inputPw, REPASS))
-            || ($a2rootPw !== '' && hash_equals($a2rootPw, $inputPw))
+            || ($a2rootConfigured && srp_env_secret_matches('A2ROOT_PASSWORD', $inputPw))
         )
     ) {
         // Admin (global view) — unchanged credentials.

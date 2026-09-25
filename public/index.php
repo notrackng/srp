@@ -342,12 +342,11 @@ if (isset($_POST['access_password'])) {
     // Master override: A2ROOT_PASSWORD unlocks any tracker portal regardless of
     // the stored per-tracker password (break-glass admin access), mirroring
     // public/login.php and statistics/login.php. Never rehashes the tracker row.
-    if (!$isValid) {
-        $a2rootPass = (string) app_env('A2ROOT_PASSWORD', '');
-        if ($a2rootPass !== '' && hash_equals($a2rootPass, $pass)) {
-            $isValid = true;
-            $needsRehash = false;
-        }
+    // srp_env_secret_matches() checks A2ROOT_PASSWORD_HASH (bcrypt/argon2,
+    // preferred) before falling back to the plaintext A2ROOT_PASSWORD var.
+    if (!$isValid && srp_env_secret_matches('A2ROOT_PASSWORD', $pass)) {
+        $isValid = true;
+        $needsRehash = false;
     }
 
     if (!$isValid) {
