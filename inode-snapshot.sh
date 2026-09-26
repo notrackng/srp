@@ -26,7 +26,7 @@ mkdir -p "$LOG_DIR"
 {
     echo "===== $(date -u +'%Y-%m-%d %H:%M:%S UTC') ====="
     echo "-- df -i (whole shared filesystem, not just this account) --"
-    df -i /home/taawonap 2>&1 | tail -n +1
+    df -i "$PROJECT_DIR" 2>&1 | tail -n +1
     echo "-- last line of each cron job's log (freshness check) --"
     for f in cache-cleanup.log cleanup-storage.log geoip-update.log rotate-logs.log; do
         path="${LOG_DIR}/${f}"

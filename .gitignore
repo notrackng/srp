@@ -18,6 +18,13 @@ public/.user.ini
 redirect/.user.ini
 statistics/.user.ini
 
+# cPanel-generated per-directory PHP config (same reason as the .user.ini
+# files above — bakes the generating account's home directory into whatever
+# clones this repo). Managed by cPanel's MultiPHP INI Editor on the live
+# server; env.php's srp_configure_error_log() overrides error_log at runtime
+# regardless, so a missing copy here never breaks anything.
+redirect/php.ini
+
 # Generated at deploy time by the operator via the first-load password setup
 # in statistics/report-password.php. Shipping one hands every deployment the
 # same hash.
