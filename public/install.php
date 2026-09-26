@@ -1881,7 +1881,7 @@ pre.manual{background:var(--panel-2);border:1px solid var(--line);border-radius:
 
   // 1 · System
   function renderChecks(checks){
-    var box = q('checks'); box.innerHTML = '';
+    var box = q('checks'); box.textContent = '';
     checks.forEach(function(c){
       var d = document.createElement('div'); d.className = 'check';
       var dot = document.createElement('span'); dot.className = 'dot ' + (c.ok ? 'ok' : (c.required ? 'bad' : 'warn'));
@@ -2029,18 +2029,26 @@ pre.manual{background:var(--panel-2);border:1px solid var(--line);border-radius:
     }).then(function(r){
       if (!r.ok) { setStatus('p6_status', false, r.error || r.err || 'failed'); return; }
       setStatus('p6_status', true, 'Installed. Copy the values below — they are shown only once.');
-      var box = q('p6_secrets'); box.style.display = 'block'; box.innerHTML = '';
+      var box = q('p6_secrets'); box.style.display = 'block'; box.textContent = '';
+      function kvRow(k, v) {
+        var row = document.createElement('div');
+        var b = document.createElement('b'); b.textContent = k;
+        row.appendChild(b);
+        row.appendChild(document.createTextNode(' = ' + v));
+        return row;
+      }
       if (r.secrets) {
         Object.keys(r.secrets).forEach(function(k){
-          var row = document.createElement('div'); row.innerHTML = '<b>' + k + '</b> = ' + r.secrets[k];
-          box.appendChild(row);
+          box.appendChild(kvRow(k, r.secrets[k]));
         });
       }
       if (r.passwords && Object.keys(r.passwords).length) {
-        var h = document.createElement('div'); h.innerHTML = '<br>Generated passwords:'; box.appendChild(h);
+        var h = document.createElement('div');
+        h.appendChild(document.createElement('br'));
+        h.appendChild(document.createTextNode('Generated passwords:'));
+        box.appendChild(h);
         Object.keys(r.passwords).forEach(function(k){
-          var row = document.createElement('div'); row.innerHTML = '<b>' + k + '</b> = ' + r.passwords[k];
-          box.appendChild(row);
+          box.appendChild(kvRow(k, r.passwords[k]));
         });
       }
     });
