@@ -18,11 +18,12 @@ ErrorDocument 404 /404.php
 
 # Block internal include-only files.
 #
-# NOTE on report-password.php: it is intentionally NOT in this list, but it is
-# only safe while report_auth.php exists. With that file absent the page renders
-# an UNAUTHENTICATED "create admin password" form, and whoever loads it first
-# owns the statistics report password. Set the password immediately after
-# opening it, or add report-password\.php back to this group.
+# NOTE on report-password.php: it is intentionally NOT in this list. Before
+# report_auth.php exists, its action=setup is unauthenticated by definition
+# (that is how the first admin password gets created) -- but that window is
+# now gated by report_password.token (see the root .htaccess deny list and
+# INSTALL.md, Langkah 5): without a valid token on disk the page 404s outright,
+# so whoever loads it first can no longer claim it just by getting there first.
 <FilesMatch "^(repass\.php|report_auth\.php|stat_path\.php|header\.php)$">
     <IfModule mod_authz_core.c>
         Require all denied

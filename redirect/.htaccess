@@ -9,7 +9,7 @@ ErrorDocument 404 /404.php
 </IfModule>
 
 # ─── Block sensitive files ─────────────────────────────────────────────────────
-<FilesMatch "^(\.env|\.env\..*|env\.php|connection\.config\.php|redirect_payload\.php|public_link\.php|ip_address\.php|Base64URL\.php|Mobile_Detect\.php|phpstan.*|composer\.(json|lock))$">
+<FilesMatch "^(\.env|\.env\..*|env\.php|connection\.config\.php|redirect_payload\.php|public_link\.php|ip_address\.php|Base64URL\.php|Mobile_Detect\.php|engine\.php|phpstan.*|composer\.(json|lock))$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
@@ -105,16 +105,11 @@ ErrorDocument 404 /404.php
     RewriteRule ^([a-zA-Z0-9_-]{1,2048})/?$ index.php?sub_id=$1 [QSA,NC,L]
 </IfModule>
 
-# BEGIN cPanel-generated php ini directives, do not edit
-# Manual editing of this file may result in unexpected behavior.
-# To make changes to this file, use the cPanel MultiPHP INI Editor (Home >> Software >> MultiPHP INI Editor)
-# For more information, read our documentation (https://go.cpanel.net/EA4ModifyINI)
-<IfModule php8_module>
-   php_value error_log "/home/taawonap/logs/php.error.log"
-   php_flag log_errors On
-</IfModule>
-<IfModule lsapi_module>
-   php_value error_log "/home/taawonap/logs/php.error.log"
-   php_flag log_errors On
-</IfModule>
-# END cPanel-generated php ini directives, do not edit
+# PHP settings live in .user.ini / redirect/php.ini, not here.
+#
+# The cPanel-generated php8_module/lsapi_module directive block that used to
+# sit here was removed for the same reason the root .htaccess's copy was:
+# cPanel regenerates it per account (marked "do not edit") and it hardcoded
+# the generating account's home directory, so every other copy of this tree
+# kept trying to log to a path that did not exist on it. env.php's
+# srp_configure_error_log() overrides the error_log path at runtime anyway.
