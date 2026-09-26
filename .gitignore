@@ -46,3 +46,18 @@ redirect/logs/
 *.zip
 *.manifest.txt
 
+# Stray editor/manual backup copies — never meant to ship (blocked from HTTP
+# access by .htaccess, but should not be in version control either).
+*.bak
+*.bak[0-9]*
+
+# Local tool caches — regenerated on every run, never meant to be shared.
+.phpunit.result.cache
+.phpunit.cache/
+.php-cs-fixer.cache
+
+# OS/editor junk.
+.DS_Store
+Thumbs.db
+desktop.ini
+

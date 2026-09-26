@@ -11,6 +11,7 @@ $pdo = require __DIR__ . '/../../connection_pdo.php';
 
 require_once dirname(__DIR__, 2) . '/Base64URL.php';
 require_once dirname(__DIR__, 2) . '/domain_readiness.php';
+require_once dirname(__DIR__, 2) . '/redirect/public_link.php';
 require_once __DIR__ . '/generate_api_helpers.php';
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -442,7 +443,7 @@ try {
     $strParam = ['{sub}', '{click_id}'];
     $strBuild = [
         $sp,
-        base64url_encode(
+        srp_public_link_encode_legacy_token(
             randomTokenPrefix(5)
             . ',' . strtoupper($subId)
             . ',' . time()

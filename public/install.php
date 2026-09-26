@@ -1179,7 +1179,7 @@ function inst_build_env(array $c, array $secrets, array $hashes): string
         'POSTBACK_SECRET=' . inst_env_value($secrets['POSTBACK_SECRET']),
         'POSTBACK_TIMEZONE=' . inst_env_value((string) ($c['postback_timezone'] ?? 'UTC')),
         '',
-        'SRP_CLOAK_DEBUG_KEY=' . inst_env_value((string) ($c['cloak_debug_key'] ?? '1')),
+        'SRP_CLOAK_DEBUG_KEY=' . inst_env_value((string) ($c['cloak_debug_key'] ?? '')),
         'SRP_ALLOW_CLOUDFLARE_INSIGHTS=' . inst_env_value((string) ($c['allow_cf_insights'] ?? '0')),
     ];
 
@@ -1406,7 +1406,7 @@ function inst_act_finalize(): array
         'maxmind_key' => inst_post_string('maxmind_key'),
         'maxmind_account_id' => inst_post_string('maxmind_account_id'),
         'postback_timezone' => inst_post_string('postback_timezone', 'UTC'),
-        'cloak_debug_key' => inst_post_string('cloak_debug_key', '1'),
+        'cloak_debug_key' => inst_post_string('cloak_debug_key', ''),
         'allow_cf_insights' => inst_post_string('allow_cf_insights', '0'),
     ];
 

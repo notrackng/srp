@@ -103,22 +103,35 @@ function pcSelfPath(): string
     return $scriptName;
 }
 
+// Safety cap on how many in-scope click rows a single request will count.
+// Without this, every page view — even page 1 — re-parses and json_decode()s
+// the ENTIRE daily click-log file just to produce an exact "of N" total,
+// because the total must count only scope-filtered (per-tracker) matches, so
+// it can't be derived from filesize/line-count alone. 20000 rows is 200 pages
+// at $perPage=100 — no operator pages that far — so real-world days (the
+// overwhelming majority) are completely unaffected: same exact total, same
+// rows, same footer. Only an abnormally high-traffic day stops the scan early
+// once the cap is reached instead of decoding the rest of the file, and the
+// footer below renders "20,000+" instead of a possibly-inflated exact count.
+const SRP_CLICKS_COUNT_CAP = 20000;
+
 /**
- * @return array{total: int, rows: array<int, mixed>}
+ * @return array{total: int, rows: array<int, mixed>, capped: bool}
  */
 function pcReadJsonPage(string $filename, int $offset, int $limit): array
 {
     if (!is_file($filename) || !is_readable($filename)) {
-        return ['total' => 0, 'rows' => []];
+        return ['total' => 0, 'rows' => [], 'capped' => false];
     }
 
     $handle = fopen($filename, 'rb');
     if (!is_resource($handle)) {
-        return ['total' => 0, 'rows' => []];
+        return ['total' => 0, 'rows' => [], 'capped' => false];
     }
 
     $total = 0;
     $rows = [];
+    $capped = false;
     $inArray = false;
     $started = false;
     $complexElement = false;
@@ -159,7 +172,10 @@ function pcReadJsonPage(string $filename, int $offset, int $limit): array
             }
 
             if (!$complexElement && !$inString && ($char === ',' || $char === ']')) {
-                pcCollectJsonElement($element, $total, $rows, $offset, $limit);
+                if (!pcCollectJsonElement($element, $total, $rows, $offset, $limit)) {
+                    $capped = true;
+                    break 2;
+                }
                 $started = false;
                 $element = '';
                 if ($char === ']') {
@@ -194,7 +210,10 @@ function pcReadJsonPage(string $filename, int $offset, int $limit): array
             if ($complexElement && ($char === '}' || $char === ']')) {
                 $depth--;
                 if ($depth === 0) {
-                    pcCollectJsonElement($element, $total, $rows, $offset, $limit);
+                    if (!pcCollectJsonElement($element, $total, $rows, $offset, $limit)) {
+                        $capped = true;
+                        break 2;
+                    }
                     $started = false;
                     $element = '';
                 }
@@ -204,22 +223,27 @@ function pcReadJsonPage(string $filename, int $offset, int $limit): array
 
     fclose($handle);
 
-    if ($started && trim($element) !== '') {
+    if (!$capped && $started && trim($element) !== '') {
         pcCollectJsonElement($element, $total, $rows, $offset, $limit);
     }
 
-    return ['total' => $total, 'rows' => $rows];
+    return ['total' => $total, 'rows' => $rows, 'capped' => $capped];
 }
 
 /**
+ * Decode one element and, if it's in scope, count it and (if it falls within
+ * the requested page) collect it. Returns false once the count cap has been
+ * reached, telling the caller to stop scanning the rest of the file — see
+ * SRP_CLICKS_COUNT_CAP above.
+ *
  * @param array<int, mixed> $rows
  */
-function pcCollectJsonElement(string $element, int &$total, array &$rows, int $offset, int $limit): void
+function pcCollectJsonElement(string $element, int &$total, array &$rows, int $offset, int $limit): bool
 {
     try {
         $decoded = json_decode($element, true, 32, JSON_THROW_ON_ERROR);
-    } catch (Throwable $e) {
-        return;
+    } catch (Throwable) {
+        return true;
     }
 
     // Per-tracker partition. The click log is shared by every tracker, so a
@@ -227,17 +251,17 @@ function pcCollectJsonElement(string $element, int &$total, array &$rows, int $o
     // filtering before $total is what keeps the pagination totals honest.
     // Admin (null scope) still sees everything. See stat_path.php.
     if (!stat_click_log_row_in_scope($decoded)) {
-        return;
+        return true;
     }
 
     $position = $total;
     $total++;
 
-    if ($position < $offset || count($rows) >= $limit) {
-        return;
+    if ($position >= $offset && count($rows) < $limit) {
+        $rows[] = $decoded;
     }
 
-    $rows[] = $decoded;
+    return $total < SRP_CLICKS_COUNT_CAP;
 }
 
 function pcCurrentPage(int $totalPages): int
@@ -379,9 +403,7 @@ function pcRenderNetwork(mixed $info): string
 pcSendSecurityHeaders($rtNonce);
 pcHandlePostLogout();
 
-$pageName = basename(__DIR__);
-$isPerformanceClick = $pageName === 'click';
-$title = $isPerformanceClick ? 'PERFORMANCE CLICKS' : 'PERFORMANCE CLICKS';
+$title = 'PERFORMANCE CLICKS';
 
 $time = gmdate('Y-m-d'); // UTC "today": matches the click-log writer (redirect/_meetups) and postback conversion_date
 
@@ -393,6 +415,7 @@ $requestedPage = pcCurrentPage(1000000);
 $offset = ($requestedPage - 1) * $perPage;
 $pageData = pcReadJsonPage($filename, $offset, $perPage);
 $total = $pageData['total'];
+$totalCapped = $pageData['capped'];
 $totalPages = max(1, (int) ceil($total / $perPage));
 $page = min($requestedPage, $totalPages);
 $offset = ($page - 1) * $perPage;
@@ -624,7 +647,7 @@ input:focus,textarea:focus,select:focus,button:focus,.form-control:focus,.btn:fo
                 </ul>
                 <small class="pc-page-meta">
                     <?= number_format($total > 0 ? $offset + 1 : 0) ?>–<?= number_format(min($offset + $perPage, $total)) ?>
-                    of <?= number_format($total) ?>
+                    of <?= number_format($total) ?><?= $totalCapped ? '+' : '' ?>
                 </small>
             </nav>
         <?php endif; ?>

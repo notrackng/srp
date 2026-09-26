@@ -121,12 +121,29 @@ $statusCode = $allOk ? 200 : 503;
 
 http_response_code($statusCode);
 
+// This endpoint has no auth by design (load balancers/uptime monitors hit it
+// unauthenticated), so the detailed breakdown — loaded PHP extensions, GeoIP2
+// mmdb presence, exact PHP version — is minor fingerprinting fodder for any
+// anonymous caller. Optional and off by default (SRP_HEALTH_DETAIL_KEY unset
+// keeps today's full-detail response, so existing monitors that read
+// `checks.*` keep working unchanged): an operator who wants the breakdown
+// restricted sets the key and passes it via ?key=. The 200/503 status code
+// itself is never gated — that's the actual signal a load balancer needs.
+$healthDetailKey = trim((string) app_env('SRP_HEALTH_DETAIL_KEY', ''));
+$suppliedDetailKey = isset($_GET['key']) && is_string($_GET['key']) ? $_GET['key'] : '';
+$showDetail = $healthDetailKey === '' || ($suppliedDetailKey !== '' && hash_equals($healthDetailKey, $suppliedDetailKey));
+
+$payload = [
+    'ok'   => $allOk,
+    'time' => date('c'),
+];
+
+if ($showDetail) {
+    $payload['checks'] = $checks;
+    $payload['errors'] = $errors;
+}
+
 echo json_encode(
-    [
-        'ok'       => $allOk,
-        'checks'   => $checks,
-        'errors'   => $errors,
-        'time'     => date('c'),
-    ],
+    $payload,
     JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR,
 ) . "\n";

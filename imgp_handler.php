@@ -21,32 +21,58 @@ ini_set('log_errors', '1');
  * Resizes to max 1200×630 and re-encodes as JPEG (≤85 quality) if GD is available.
  */
 
-if (!function_exists('imgp_is_private_ip')) {
-    function imgp_is_private_ip(string $ip): bool
+if (!function_exists('imgp_rate_exceeded')) {
+    /**
+     * Fixed-window per-IP rate check, mirroring
+     * redirect/api/shorten.php's srp_shorten_rate_exceeded(). Fail-open: an
+     * unidentifiable client or an unwritable counter lets the request through
+     * rather than block/crash the endpoint. Without this, /imgp had no
+     * throttle at all — unlike every other network-touching endpoint in this
+     * codebase (the main redirect path, /api/shorten, /internal/v1/*) — so an
+     * anonymous caller could repeatedly force a server-side fetch (up to 5MB)
+     * plus a GD resize of any attacker-chosen public image: bandwidth/CPU
+     * amplification with no cost to the caller.
+     */
+    function imgp_rate_exceeded(int $maxPerMinute = 60): bool
     {
-        // Fail closed on anything that isn't a valid IP literal.
-        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
-            return true;
+        require_once __DIR__ . '/ip_address.php';
+        require_once __DIR__ . '/redirect/functions.php';
+
+        $ip = getUserIP();
+        if ($ip === '') {
+            return false;
         }
 
-        // Reject RFC1918 private ranges, loopback, link-local (incl. the cloud
-        // metadata address 169.254.169.254), 0.0.0.0/8, other reserved ranges,
-        // and the IPv6 equivalents (ULA, ::1, fe80::/10). Covers IPv4 and IPv6,
-        // which the previous hand-rolled IPv4-only range list did not.
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
-            return true;
+        $dir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
+            . (defined('SRP_CACHE_DIR_NAME') ? SRP_CACHE_DIR_NAME : 'srp_bb');
+        if (!srp_ensure_private_dir($dir)) {
+            return false;
         }
 
-        // Carrier-grade NAT (100.64.0.0/10) is not covered by the reserved-range
-        // flag but can still reach internal infrastructure — block it explicitly.
-        $long = ip2long($ip);
-        if ($long !== false && $long >= ip2long('100.64.0.0') && $long <= ip2long('100.127.255.255')) {
-            return true;
+        // Predictable filename (md5 of IP + window) — refuse a pre-planted
+        // symlink at this exact path rather than write through it.
+        $window = (int) (time() / 60);
+        $file = $dir . DIRECTORY_SEPARATOR . 'rl_imgp_' . md5($ip . '|' . $window) . '.json';
+        if (is_link($file)) {
+            return false;
         }
 
-        return false;
+        $count = 0;
+        if (is_file($file)) {
+            $data = json_decode((string) @file_get_contents($file), true);
+            if (is_array($data) && isset($data['c']) && is_int($data['c'])) {
+                $count = $data['c'];
+            }
+        }
+
+        $count++;
+        srp_write_private_file($file, (string) json_encode(['c' => $count]));
+
+        return $count > $maxPerMinute;
     }
 }
+
+require_once __DIR__ . '/imgp_ssrf_guard.php';
 
 // ── Decode the URL parameter ──────────────────────────────────────────────────
 $encoded = isset($_GET['u']) && is_string($_GET['u']) ? trim($_GET['u']) : '';
@@ -79,6 +105,16 @@ $host = (string) parse_url($url, PHP_URL_HOST);
 if ($host === '') {
     http_response_code(400);
     exit;
+}
+
+// ── Rate limit ────────────────────────────────────────────────────────────────
+// Gates the expensive part of the request (DNS resolution + cURL fetch + GD
+// resize below); cheap format/scheme validation above still runs unthrottled.
+if (imgp_rate_exceeded()) {
+    http_response_code(429);
+    header('Retry-After: 60');
+    header('Content-Type: text/plain; charset=UTF-8');
+    exit('Rate limit exceeded. Try again later.');
 }
 
 // ── SSRF guard ────────────────────────────────────────────────────────────────

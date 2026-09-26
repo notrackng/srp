@@ -990,8 +990,30 @@ setInterval(function () {
 
     $.fn.dataTable.ext.errMode = 'throw';
 
+    // Authoritative day total from the server (data.php: total_payout), used
+    // by footerCallback below instead of summing the loaded rows — data.php
+    // caps how many rows it returns on a high-volume day, so summing only
+    // the visible rows would silently understate "Total Earning" once that
+    // cap is hit. null until the first response arrives, and the footer
+    // falls back to the old visible-rows sum if a response never sets it.
+    var rtAuthoritativeTotal = null;
+
+    function rtCaptureAuthoritativeTotal(json) {
+        if (json && typeof json.total_payout !== 'undefined') {
+            var parsed = parseFloat(json.total_payout);
+            rtAuthoritativeTotal = isNaN(parsed) ? null : parsed;
+        }
+    }
+
     var table = $('#userlead').DataTable({
-        ajax: 'data.php?date=' + encodeURIComponent(String(rtConversion)),
+        ajax: {
+            url: 'data.php?date=' + encodeURIComponent(String(rtConversion)),
+            dataSrc: function (json) {
+                rtCaptureAuthoritativeTotal(json);
+
+                return (json && Array.isArray(json.data)) ? json.data : [];
+            }
+        },
         columns: [
             {data: 'id'},
             {data: 'click_id'},
@@ -1030,12 +1052,14 @@ setInterval(function () {
                 return 0;
             };
 
-            var pageTotal = api
-                .column(5, {page: 'current'})
-                .data()
-                .reduce(function (a, b) {
-                    return intVal(a) + intVal(b);
-                }, 0);
+            var pageTotal = rtAuthoritativeTotal !== null
+                ? rtAuthoritativeTotal
+                : api
+                    .column(5, {page: 'current'})
+                    .data()
+                    .reduce(function (a, b) {
+                        return intVal(a) + intVal(b);
+                    }, 0);
 
             $('#sum').html('<i>Total Earning: $' + pageTotal.toFixed(2) + '</i>');
         }
@@ -1046,6 +1070,7 @@ setInterval(function () {
             return;
         }
 
+        rtCaptureAuthoritativeTotal(json);
         table.clear();
         table.rows.add(json.data);
         table.draw(false);

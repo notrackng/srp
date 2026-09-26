@@ -29,6 +29,9 @@ require_once __DIR__ . '/functions.php';
  *   rl_int_*.json — 1 hour (redirect/internal/ per-IP rate limit; same 60 s
  *                        window, own prefix so the silent cloak's throttle is
  *                        distinguishable from the redirect engine's rl_)
+ *   rl_imgp_*.json — 1 hour (imgp_handler.php per-IP rate limit; same 60 s
+ *                        window as the other rl_* buckets, own prefix for the
+ *                        same reason)
  *   lf_*.json    — 1 day  (login throttle; see note below)
  *   filter_url.txt — 30 days (runtime overrides should persist)
  *
@@ -71,6 +74,7 @@ $rules = [
     'slp_'    => 3600,        // 1 hour  (srp_short_link_find() TTL is 5 min; keep margin)
     'rl_shorten_' => 3600,    // 1 hour  (shorten API rate-limit window is 60 s; keep margin)
     'rl_int_' => 3600,        // 1 hour  (internal cloak rate-limit window is 60 s; keep margin)
+    'rl_imgp_' => 3600,       // 1 hour  (imgp_handler.php rate-limit window is 60 s; keep margin)
     'rl_'     => 3600,        // 1 hour  (rate-limit window is 60 s; keep margin)
     'lf_'     => 86400,       // 1 day   (throttle window is 1 h; keep forensic margin)
     'filter_' => 30 * 86400,  // 30 days

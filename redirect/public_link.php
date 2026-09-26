@@ -2,6 +2,25 @@
 
 declare(strict_types=1);
 
+/*
+ * The outward-facing legacy "sub_id" token (?sub_id=... / the {click_id}
+ * placeholder minted by public/api/generate_api.php) used to be plain
+ * base64url(csv) with no integrity check: anyone holding one public link
+ * could decode it, edit click_id/user_lp/lg, and re-encode a forged link
+ * that still credited clicks against the original click_id — click-fraud /
+ * stats pollution via token tampering.
+ *
+ * It is now HMAC-signed the same way the internal `rk` token is signed in
+ * redirect_payload.php: signature = base64url(HMAC-SHA256(payload, key)).
+ * HMAC-SHA256 output is always 32 bytes, which always base64url-encodes
+ * (no padding) to exactly 43 characters — so the signature is appended
+ * directly to the payload with NO separator character, keeping the whole
+ * token inside the [A-Za-z0-9_-] alphabet every caller already validates it
+ * against (redirect/index.php, .htaccess routing, this file's own token
+ * regexes) instead of needing a new delimiter or looser charset everywhere.
+ */
+const SRP_PUBLIC_LINK_SIGNATURE_LENGTH = 43;
+
 /**
  * @return array{
  *     click_id: string,
@@ -21,7 +40,29 @@ function srp_public_link_decode_legacy_token(string $token): ?array
         return null;
     }
 
-    $decoded = base64url_decode($token);
+    // Fail closed: a token that is not longer than the signature itself
+    // cannot carry both a payload and a signature.
+    if (strlen($token) <= SRP_PUBLIC_LINK_SIGNATURE_LENGTH) {
+        return null;
+    }
+
+    $payloadPart = substr($token, 0, -SRP_PUBLIC_LINK_SIGNATURE_LENGTH);
+    $signaturePart = substr($token, -SRP_PUBLIC_LINK_SIGNATURE_LENGTH);
+
+    try {
+        $expectedSignature = base64url_encode(
+            hash_hmac('sha256', $payloadPart, srp_public_link_signing_key(), true),
+        );
+    } catch (RuntimeException) {
+        // No signing secret configured: fail closed, no legacy token is valid.
+        return null;
+    }
+
+    if (!hash_equals($expectedSignature, $signaturePart)) {
+        return null;
+    }
+
+    $decoded = base64url_decode($payloadPart);
 
     if (!is_string($decoded) || $decoded === '') {
         return null;
@@ -55,6 +96,50 @@ function srp_public_link_decode_legacy_token(string $token): ?array
         'lg' => srp_public_link_normalize_lg($parts[7] ?? ''),
         'block_vpn_asn' => srp_public_link_decode_block_vpn_asn($parts[8] ?? null),
     ];
+}
+
+/**
+ * Sign a legacy sub_id CSV payload for outward use. The single caller is
+ * public/api/generate_api.php (the only place that mints these tokens);
+ * srp_public_link_decode_legacy_token() above is the matching verifier.
+ */
+function srp_public_link_encode_legacy_token(string $csv): string
+{
+    $payload = base64url_encode($csv);
+    $signature = base64url_encode(
+        hash_hmac('sha256', $payload, srp_public_link_signing_key(), true),
+    );
+
+    return $payload . $signature;
+}
+
+/**
+ * Resolve the raw HMAC key for legacy sub_id token signing. Prefers
+ * SRP_RK_SECRET and accepts the same documented application-secret fallbacks
+ * as srp_redirect_payload_key() (redirect_payload.php), but with its own
+ * domain-separation tag so the two signatures can never collide even though
+ * they may share the same underlying secret.
+ */
+function srp_public_link_signing_key(): string
+{
+    $base = '';
+    foreach (['SRP_RK_SECRET', 'AF_SECRET', 'SRP_API_KEY', 'POSTBACK_SECRET'] as $name) {
+        $value = getenv($name);
+        if ($value === false || $value === '') {
+            $value = $_ENV[$name] ?? $_SERVER[$name] ?? '';
+        }
+        if (is_string($value) && $value !== '') {
+            $base = $value;
+            break;
+        }
+    }
+
+    if ($base === '') {
+        error_log('[srp_public_link] no signing secret configured; legacy sub_id tokens disabled');
+        throw new RuntimeException('Public link signing secret is not configured.');
+    }
+
+    return hash('sha256', 'srp|subid|v1|' . $base, true);
 }
 
 /**
