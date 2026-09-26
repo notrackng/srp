@@ -1,0 +1,18 @@
+SRP full-production cPanel package
+built        : 2026-09-24 12:39:16 +07:00
+source       : D:\.APPSRP\srp
+zip          : D:\.APPSRP\srp\srp-full-production-cpanel.zip
+sha256       : 7AAB98C4A957E2A52680DA14ACB174F34165B33A79B55E09F9B12407A69AE703
+layout       : public_html/* (main domain docroot)
+entries      : 651 file(s), 121 dir(s)
+size         : 41,71 MB zipped from 47,41 MB raw
+compression  : Optimal
+php lint     : 307 file(s) OK
+
+Excluded root entries: .agent.md, .continue/, .git/, .github/, .gitignore, .tmp-cpanel-full-prod/, .vscode/, build-cpanel-full-production.ps1, build-cpanel-full-production.sh, srp-cpanel-upload.zip, srp-deploy.zip, srp-full-production-cpanel.manifest.txt, srp-full-production-cpanel.zip, tests/
+
+After extracting, apply permissions from INSTALL.md section B step 0:
+  find . -type d -exec chmod 750 {} \;
+  find . -type f -exec chmod 640 {} \;
+  chmod 750 deploy-production.sh setup-cron.sh rotate-logs.sh inode-snapshot.sh
+Zip files carry no Unix mode bits, so this step is mandatory.
