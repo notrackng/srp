@@ -11,7 +11,7 @@ DirectoryIndex index.php login.php index.html
 ErrorDocument 404 /404.php
 
 # ─── Block sensitive files ─────────────────────────────────────────────────────
-<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|xmlapi\.php|session_guards\.php|password\.login\.php|cf-lib\.php)$">
+<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|xmlapi\.php|session_guards\.php|password\.login\.php|cf-lib\.php|checkdomain_helpers\.php|generate_api_helpers\.php|cpanel_addon_lib\.php|cf_token_crypto\.php)$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
