@@ -44,4 +44,5 @@ redirect/logs/
 
 # Build artifacts — production release packages are generated, never committed.
 *.zip
+*.manifest.txt
 
