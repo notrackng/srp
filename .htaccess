@@ -78,12 +78,11 @@ RewriteRule ^robots\.txt$ robots.php [L,QSA]
 RewriteCond %{HTTP_HOST} ^(?:mail|cpanel|webmail|webdisk|autodiscover|ftp)\.(?:[a-z0-9-]+\.)+[a-z]{2,63}$ [NC]
 RewriteRule ^ - [F,L]
 
-# The web installer lives behind install-dashboard.php?install=1 (install.php was
-# folded into installer_lib.php; env-config.php, the previous entry point, was
-# removed along with the .env editor it carried). Access requires install.token
-# to exist at the docroot and its secret to be posted back; the installer refuses
-# to run once install.lock exists, and finalize deletes the token. Both files
-# are denied below, so neither is ever served.
+# The web installer (public/install.php) requires install.token to exist at
+# the docroot and its secret to be posted back; it refuses to run once
+# install.lock exists, and finalize deletes the token. Both files are denied
+# below, so neither is ever served. statistics/report-password.php's first-run
+# setup is gated by report_password.token the same way; also denied below.
 
 RewriteRule ^redirect-decision\.php$ public/redirect-decision.php [L]
 
@@ -197,7 +196,7 @@ RewriteCond %{DOCUMENT_ROOT}/index.php !-f
 RewriteRule ^ - [R=404,L]
 
 # ─── Block sensitive files ────────────────────────────────────────────────────
-<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|install\.(lock|token)|schema\.sql|\.gitignore|\.gitattributes|phpunit\.xml(\.dist)?|phpstan(-baseline)?\.neon|\.php-cs-fixer\.dist\.php|(DEPLOY|INSTALL)(-[0-9A-Za-z._-]+)?\.md|README\.md|CLAUDE\.md|CPANEL_DEPLOYMENT_CHECKLIST\.md)$">
+<FilesMatch "^(\.env|\.env\..*|composer\.(json|lock)|install\.(lock|token)|report_password\.token|schema\.sql|\.gitignore|\.gitattributes|phpunit\.xml(\.dist)?|phpstan(-baseline)?\.neon|\.php-cs-fixer\.dist\.php|(DEPLOY|INSTALL)(-[0-9A-Za-z._-]+)?\.md|README\.md|CLAUDE\.md|CPANEL_DEPLOYMENT_CHECKLIST\.md)$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
@@ -298,8 +297,8 @@ RewriteRule ^ - [R=404,L]
 
 # PHP settings live in .user.ini, not here.
 #
-# The cPanel-generated <IfModule php8_module>/<IfModule lsapi_module> blocks that
-# used to sit below were removed: cPanel regenerates them per account (which is
+# The cPanel-generated php8_module/lsapi_module directive blocks that used to
+# sit below were removed: cPanel regenerates them per account (which is
 # why two identical copies had accumulated), they are marked "do not edit", and
 # they hardcoded the generating account's home directory, so every copy of this
 # tree kept logging to a path that did not exist on it.
