@@ -140,6 +140,43 @@ try {
         // Silently proceed without top click ID
     }
 
+    // Authoritative day total, independent of the row cap below: the client
+    // renders this list with paging disabled and sums whatever rows it has
+    // loaded for the "Total Earning" footer, so capping the row set without
+    // also handing over a true total would silently understate that figure
+    // on a high-volume day instead of just showing fewer rows.
+    $totalRowCount = 0;
+    $totalPayout = 0.0;
+    $totalsAvailable = false;
+
+    try {
+        $sqlTotals = '
+            SELECT COUNT(*) AS cnt, COALESCE(SUM(payout), 0) AS total
+            FROM leadreport
+            WHERE conversion_date = :date' . $scopeSql . '
+        ';
+        $stmtTotals = $pdo->prepare($sqlTotals);
+        $stmtTotals->execute(array_merge(['date' => $conversionDate], $scopeParams));
+        $rowTotals = $stmtTotals->fetch(PDO::FETCH_ASSOC);
+
+        if (is_array($rowTotals)) {
+            $totalRowCount = (int) ($rowTotals['cnt'] ?? 0);
+            $totalPayout = (float) ($rowTotals['total'] ?? 0.0);
+            $totalsAvailable = true;
+        }
+    } catch (Throwable $e) {
+        // $totalsAvailable stays false: the client must not mistake a failed
+        // totals query for a genuine "$0.00" and needs to fall back to
+        // summing visible rows instead — see the 'total_payout' key omission
+        // below.
+    }
+
+    // Bounds how many rows a single high-volume day forces this endpoint to
+    // fetch/decode/render — this view has paging disabled, so without a cap
+    // every poll (every 10s while new leads arrive) re-transfers the entire
+    // day's leads. 2000 is comfortably above a normal day's volume.
+    $rowLimit = 2000;
+
     $sql = '
     SELECT
         id,
@@ -154,14 +191,28 @@ try {
     FROM leadreport
     WHERE conversion_date = :date' . $scopeSql . '
     ORDER BY id DESC
+    LIMIT :limit_val
 ';
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute(array_merge(['date' => $conversionDate], $scopeParams));
+    foreach (array_merge(['date' => $conversionDate], $scopeParams) as $name => $value) {
+        $stmt->bindValue(':' . $name, $value, PDO::PARAM_STR);
+    }
+    $stmt->bindValue(':limit_val', $rowLimit, PDO::PARAM_INT);
+    $stmt->execute();
 
     $response = [
         'data' => [],
     ];
+
+    // Omitted entirely (not sent as a misleading "$0.00") when the totals
+    // query above failed — the client falls back to summing visible rows
+    // only when this key is genuinely absent from the response.
+    if ($totalsAvailable) {
+        $response['total_payout'] = number_format($totalPayout, 2, '.', '');
+        $response['total_count'] = $totalRowCount;
+        $response['capped'] = $totalRowCount > $rowLimit;
+    }
 
     $number = 1;
 

@@ -341,5 +341,6 @@ membawa setting saat dibuat.
 | Cron menolak path | Harus absolut (`/usr/local/bin/php`) |
 | Postback 500 | `POSTBACK_SECRET` kosong / `.env` tak terbaca |
 | CSS/JS 404 | Subdomain belum diarahkan ke docroot modul |
+| Link `lg=landing2` — foto profil / OG image rusak | `assets/img/women/1.jpg` … `10.jpg` belum di-upload manual — file ini tidak ikut ter-commit di repo. Siapkan 10 foto persegi (~800×800px) sebelum memakai `lg=landing2`; tanpanya `redirect/render_landing_2.php` merender `<img>` dan `og:image` yang menunjuk ke path yang tidak ada. |
 
 Instal ulang: hapus `install.lock` (backup `.env` dulu — finalize menimpa `.env`).

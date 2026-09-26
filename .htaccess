@@ -233,7 +233,7 @@ RewriteRule ^ - [R=404,L]
 </FilesMatch>
 
 # Block internal PHP utility files
-<FilesMatch "^(env|connection_pdo|Base64URL|Mobile_Detect|ip_address|login_throttle|imgp_handler|asset_url|installer_lib)\.php$">
+<FilesMatch "^(env|connection_pdo|Base64URL|Mobile_Detect|ip_address|login_throttle|imgp_handler|imgp_ssrf_guard|asset_url|installer_lib|domain_readiness)\.php$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>

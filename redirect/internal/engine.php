@@ -351,6 +351,49 @@ function internal_url_allowed(string $url): bool
     return true;
 }
 
+/**
+ * Resolve $url's host to a validated IP and build a CURLOPT_RESOLVE entry
+ * ("host:port:ip") pinning curl to it, so the connection below cannot be
+ * re-resolved to a different address than the one just checked. Returns null
+ * (no pinning) for a literal-IP URL, a missing dns_get_record(), or a host
+ * that does not resolve to any non-forbidden address.
+ */
+function internal_pinned_resolve_option(string $url): ?string
+{
+    $host = parse_url($url, PHP_URL_HOST);
+    if (!is_string($host) || $host === '') {
+        return null;
+    }
+
+    $port = (int) (parse_url($url, PHP_URL_PORT) ?: 443);
+    $hostClean = strtolower(trim($host, '[]'));
+
+    if (filter_var($hostClean, FILTER_VALIDATE_IP) !== false) {
+        return null; // already a literal IP — curl needs no resolve hint
+    }
+
+    if (!function_exists('dns_get_record')) {
+        return null;
+    }
+
+    $records = @dns_get_record($hostClean, DNS_A | DNS_AAAA);
+    if (!is_array($records)) {
+        return null;
+    }
+
+    foreach ($records as $record) {
+        $resolved = is_string($record['ip'] ?? null)
+            ? $record['ip']
+            : (is_string($record['ipv6'] ?? null) ? $record['ipv6'] : null);
+
+        if ($resolved !== null && !internal_ip_is_forbidden($resolved)) {
+            return $host . ':' . $port . ':' . $resolved;
+        }
+    }
+
+    return null;
+}
+
 // ── Layer 1: bot / crawler detection (str_contains, no regex) ────────────────
 
 function internal_user_agent(): string
@@ -500,6 +543,21 @@ function internal_fetch(string $url, string $method, string $body, array $forwar
     ];
     if ($body !== '') {
         $options[CURLOPT_POSTFIELDS] = $body;
+    }
+
+    // Pin the connection to a freshly-resolved, validated IP so curl cannot
+    // re-resolve $host to a different address than the one just checked —
+    // internal_url_allowed() validates DNS results at request-validation
+    // time, but curl_init()/curl_exec() below would otherwise re-resolve the
+    // hostname independently, reopening the same DNS-rebinding TOCTOU window
+    // that imgp_handler.php's image-proxy fetch already closes this way.
+    // Fails open (no pinning) on a literal-IP URL, missing dns_get_record(),
+    // or an unresolvable/all-forbidden host — same fail-open stance as
+    // internal_url_allowed() itself for this destination class (operator/
+    // offer-table configured, not a fully public parameter).
+    $pinnedResolve = internal_pinned_resolve_option($url);
+    if ($pinnedResolve !== null) {
+        $options[CURLOPT_RESOLVE] = [$pinnedResolve];
     }
 
     curl_setopt_array($ch, $options);
@@ -730,8 +788,16 @@ function internal_rate_exceeded(): bool
     $window = (int) (time() / 60);
     $file = $dir . DIRECTORY_SEPARATOR . 'rl_int_' . md5($ip . '|' . $window) . '.json';
 
+    // Checked once and reused for both read and write: the counter filename is
+    // predictable (md5 of IP + window), so a pre-planted symlink at this exact
+    // path is a realistic shared-hosting attack. Trusting it on the read side
+    // only, while still writing through it unconditionally below, would leave
+    // the write as an unguarded TOCTOU overwrite of whatever the symlink
+    // targets — this makes both sides agree.
+    $fileIsLink = is_link($file);
+
     $count = 0;
-    if (is_file($file) && !is_link($file)) {
+    if (!$fileIsLink && is_file($file)) {
         $data = json_decode((string) @file_get_contents($file), true);
         if (is_array($data) && isset($data['c']) && is_int($data['c'])) {
             $count = $data['c'];
@@ -739,7 +805,9 @@ function internal_rate_exceeded(): bool
     }
 
     $count++;
-    @file_put_contents($file, json_encode(['c' => $count]), LOCK_EX);
+    if (!$fileIsLink) {
+        @file_put_contents($file, json_encode(['c' => $count]), LOCK_EX);
+    }
 
     return $count > $max;
 }

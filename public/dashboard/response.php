@@ -9,6 +9,7 @@ ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
 require_once __DIR__ . '/../tracker_password.php';
+require_once __DIR__ . '/../tracker_password_plain_crypto.php';
 
 const ADMIN_PANEL_CSRF_NAMESPACE = 'admin_panel';
 // `password_plain` (display-only mirror) is returned for the dashboard show/hide toggle; the bcrypt
@@ -206,6 +207,9 @@ function adminPanelList(PDO $pdo, array $params): array
 
     $rows = [];
     while ($row = $dataStmt->fetch(PDO::FETCH_ASSOC)) {
+        // password_plain is stored encrypted at rest (tracker_password_plain_crypto.php);
+        // decrypt at the single point it leaves the DB for display.
+        $row['password_plain'] = tracker_password_plain_decrypt((string) ($row['password_plain'] ?? ''));
         $rows[] = $row;
     }
 
@@ -235,7 +239,7 @@ function adminPanelInsert(PDO $pdo, array $params): void
     $stmt->execute([
         'sub_id' => $subId,
         'password' => srp_tracker_password_hash($password),
-        'password_plain' => $password,
+        'password_plain' => tracker_password_plain_encrypt($password),
         'gen_url' => $genUrl,
         'sm_url' => $smUrl,
     ]);
@@ -263,7 +267,7 @@ function adminPanelUpdate(PDO $pdo, array $params): void
         $columns[] = 'password = :password';
         $columns[] = 'password_plain = :password_plain';
         $args['password'] = srp_tracker_password_hash($password);
-        $args['password_plain'] = $password;
+        $args['password_plain'] = tracker_password_plain_encrypt($password);
     }
 
     $stmt = $pdo->prepare('UPDATE generate SET ' . implode(', ', $columns) . ' WHERE id = :id');

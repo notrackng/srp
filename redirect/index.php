@@ -79,7 +79,6 @@ const SRP_TARGET_BASE = '/_meetups/';
 // Hardcoded fallback only — the effective value is $blockUrl below, which
 // prefers SRP_BLOCK_URL from .env (same arrangement as SRP_FILTER_URL).
 const SRP_BLOCK_URL = 'https://www.youtube.com/';
-const SRP_DEFAULT_CANONICAL = 'https://www.denic.de/';
 const SRP_GEOIP2LITE_DB = __DIR__ . '/databases/GeoLite2-Country.mmdb';
 const SRP_GEOIP2ASN_DB = __DIR__ . '/databases/GeoLite2-ASN.mmdb';
 const SRP_CF_INSIGHTS_SCRIPT = 'https://static.cloudflareinsights.com';
@@ -277,6 +276,13 @@ if (!$isPreviewProbe) {
     // concurrent requests cannot all observe the same stale count (TOCTOU).
     // Schema unchanged: {'c': <count>, 't': <window-start-epoch>}.
     if (!srp_ensure_private_dir($rateLimitDir)) {
+        $rateLimited = false;
+    } elseif (is_link($rateLimitFile)) {
+        // The counter filename is fully predictable (md5 of the client IP),
+        // so a pre-planted symlink at this exact path is a realistic
+        // shared-hosting attack: fopen('c+') follows a symlink and would
+        // flock+overwrite whatever it points to. Refuse rather than touch
+        // it — fail-open, same as any other rate-limit I/O fault.
         $rateLimited = false;
     } else {
         // Fail-open by design: if the bucket file can't be opened or locked
@@ -548,7 +554,6 @@ if ($publicLink === null) {
 
 $clickId = srp_sanitize_token($publicLink['click_id'], 64);
 $userLp = srp_sanitize_token($publicLink['user_lp'], 64);
-$canonicalUrl = srp_sanitize_https_url($publicLink['canonical_url']) ?? SRP_DEFAULT_CANONICAL;
 $imageUrl = srp_sanitize_https_url($publicLink['image_url']) ?? '';
 $title = srp_sanitize_title($publicLink['title']);
 $lg = srp_normalize_lg($publicLink['lg']);

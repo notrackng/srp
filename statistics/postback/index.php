@@ -236,14 +236,22 @@ function pbComputeIdempotencyKey(
     string $clickId,
     string $payout,
     string $network,
-    string $traffic,
-    int $timestamp
+    string $traffic
 ): string {
-    $minute = intdiv($timestamp, 60);
-
+    // No time component: this must dedupe a replayed request FOREVER, not just
+    // within a rolling window. A per-minute bucket here previously meant anyone
+    // who captured one valid postback URL (server logs, a proxy, a compromised
+    // affiliate dashboard) could resend it once every 60 seconds indefinitely,
+    // and pbInsertLeadReport()/pbUpsertClickRecord() would credit a brand-new
+    // conversion + payout each time (fraudulent conversion injection). The
+    // `leadreport.idempotency_key` UNIQUE index plus the
+    // `ON DUPLICATE KEY UPDATE idempotency_key = idempotency_key` no-op below
+    // already exist specifically to make a repeat of the exact same conversion
+    // signature a no-op — this just lets that mechanism work as intended
+    // instead of expiring every minute.
     return hash(
         'sha256',
-        $clickId . '|' . $payout . '|' . $network . '|' . $traffic . '|' . $minute
+        $clickId . '|' . $payout . '|' . $network . '|' . $traffic
     );
 }
 
@@ -435,6 +443,38 @@ function pbMain(): never
         ]);
     }
 
+    // Unlike the other endpoint-auth secrets in this codebase, POSTBACK_SECRET
+    // has no HMAC/signature layer behind it — hash_equals() below is only as
+    // strong as the secret itself. A short-but-already-configured secret is
+    // still honored (breaking a live network integration over this would be
+    // worse than the risk), but flagged once per process so it shows up in
+    // ops logs rather than staying invisible.
+    if (strlen($expectedToken) < 32) {
+        pbLog('configuration_token_weak', ['length' => strlen($expectedToken)]);
+    }
+
+    // Per-IP throttle on failed token attempts, mirroring login_throttle.php
+    // (already used by every other password/token surface in this codebase).
+    // Previously this endpoint had no throttle and no audit trail at all for
+    // brute-forced/guessed tokens — a guessing attempt left zero trace and
+    // could be retried without limit. Fails open on any I/O error, same as
+    // login_throttle.php itself.
+    require_once $projectRoot . '/login_throttle.php';
+
+    $throttleScope = 'postback';
+    $throttleState = srp_login_throttle_state($throttleScope);
+    $lockoutSeconds = srp_login_lockout_seconds($throttleState['fails']);
+
+    if ($lockoutSeconds > 0 && (time() - $throttleState['last']) < $lockoutSeconds) {
+        pbLog('token_throttled', ['fails' => $throttleState['fails']]);
+
+        header('Retry-After: ' . $lockoutSeconds);
+        pbRespond(429, [
+            'success' => false,
+            'error' => 'Too many attempts',
+        ]);
+    }
+
     $token = pbReadQueryString('token');
 
     if (
@@ -442,11 +482,16 @@ function pbMain(): never
         || strlen($token) > 512
         || !hash_equals($expectedToken, $token)
     ) {
+        srp_login_throttle_register_fail($throttleScope);
+        pbLog('unauthorized_token');
+
         pbRespond(403, [
             'success' => false,
             'error' => 'Unauthorized',
         ]);
     }
+
+    srp_login_throttle_reset($throttleScope);
 
     $encodedClickId = trim(pbReadQueryString('click_id'));
     $rawPayout = trim(pbReadQueryString('payout'));
@@ -483,8 +528,7 @@ function pbMain(): never
         $clickId,
         $payout,
         $network,
-        $traffic,
-        $timestamp
+        $traffic
     );
     $connectionFile = $projectRoot . '/connection_pdo.php';
 
