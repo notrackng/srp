@@ -143,10 +143,17 @@ for name in "${ALLOW_DIRS[@]}"; do
     [ -d "$REPO_ROOT/$name" ] || continue
     while IFS= read -r -d '' item; do
         rel="${item#"$REPO_ROOT"/}"
+        if [ -d "$item" ]; then
+            # Directories are structure only - never recurse-copy them here, or
+            # the file entries `find` already yielded for their contents get
+            # duplicated a second time as a nested copy (e.g. women/women/).
+            mkdir -p "$DOCROOT/$rel"
+            continue
+        fi
         # Deny only real files; keep directories so empty runtime dirs survive.
-        if [ -f "$item" ] && [[ "$rel" =~ $DENY_RE ]]; then denied+=("$rel"); continue; fi
+        if [[ "$rel" =~ $DENY_RE ]]; then denied+=("$rel"); continue; fi
         mkdir -p "$DOCROOT/$(dirname "$rel")"
-        cp -Rp "$item" "$DOCROOT/$rel"
+        cp -p "$item" "$DOCROOT/$rel"
         staged=$((staged + 1))
     done < <(find "$REPO_ROOT/$name" -mindepth 1 -print0 | sort -z)
 done
